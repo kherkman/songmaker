@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Song Maker</title>
+    <!-- Caveat Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="auto-fills-active">
+    <div id="app">
+        <header>
+            <h1>Song Maker</h1>
+        </header>
+
+        <!-- Graphic Song Structure -->
+        <section class="panel timeline-panel">
+            <h2 class="collapsible-header"><span class="chevron">▼</span> Timeline & Structure</h2>
+            <div class="collapsible-content">
+                <div id="timeline-container">
+                    <div id="playhead"></div>
+                    <div id="timeline-tracks">
+                        <!-- JS will dynamically populate timeline blocks and fill dropzones here -->
+                    </div>
+                </div>
+                
+                <div class="structure-input-row">
+                    <input type="text" id="song-structure-input" placeholder="e.g., ABABCB" value="ABABCB">
+                    <button class="btn-rnd" title="Randomize Structure">RND</button>
+                    <button id="btn-apply-structure">Apply</button>
+                </div>
+
+                <!-- Transport Controls -->
+                <div class="transport-controls">
+                    <button id="btn-rewind" title="Shortcut: A">⏮ Rewind</button>
+                    <button id="btn-play-pause" title="Shortcut: W">⏯ Play/Pause</button>
+                    <button id="btn-stop" title="Shortcut: S">⏹ Stop</button>
+                    <button id="btn-forward" title="Shortcut: D">⏭ Forward</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Master Controls -->
+        <section class="panel master-panel">
+            <h2 class="collapsible-header"><span class="chevron">▼</span> Master Controls</h2>
+            <div class="collapsible-content">
+                <div class="controls-grid">
+                    <div class="control-group">
+                        <label>Root Note</label>
+                        <select id="master-root">
+                            <option value="C">C</option><option value="C#">C#</option>
+                            <option value="D">D</option><option value="D#">D#</option>
+                            <option value="E">E</option><option value="F">F</option>
+                            <option value="F#">F#</option><option value="G">G</option>
+                            <option value="G#">G#</option><option value="A">A</option>
+                            <option value="A#">A#</option><option value="B">B</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>Scale Steps <span id="scale-sum-display" style="color: var(--accent-secondary); margin-left: 5px;">(12)</span></label>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="text" id="master-scale" value="2212221" style="min-width: 0; flex: 1;">
+                            <button id="btn-rnd-scale" class="btn-rnd" title="Randomize Scale">RND</button>
+                        </div>
+                        <select id="master-scale-preset" style="margin-top: 5px; width: 100%; font-size: 0.8rem; padding: 4px;">
+                            <option value="">-- Scale Presets --</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>Tempo (BPM)</label>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <input type="number" id="master-tempo" value="120" min="40" max="300" style="width: 80px;">
+                        </div>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>Master Vol</label>
+                        <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8">
+                        <label style="margin-top: 10px;">Humanize</label>
+                        <input type="range" id="master-humanize" min="0" max="1" step="0.01" value="0">
+                    </div>
+                    
+                    <div class="control-group" style="justify-content: center;">
+                        <label class="checkbox-label" title="Automatically add fills and crashes when sections change" style="color: var(--accent-secondary); font-weight: bold;">
+                            <input type="checkbox" id="auto-fills-toggle" checked> Auto Fills
+                        </label>
+                    </div>
+                    
+                    <!-- Manual Fills UI -->
+                    <div class="control-group hidden-by-autofill" id="manual-fills-ui">
+                        <label>Add Fill To Timeline</label>
+                        <div style="display: flex; gap: 10px;">
+                            <select id="manual-fill-select">
+                                <option value="1">Fill 1</option>
+                            </select>
+                            <button id="btn-add-fill-timeline" class="btn-accent btn-small">+ Add</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="master-io-row">
+                    <div class="file-loader">
+                        <label for="local-wav-loader" class="btn-secondary">📁 Load WAVs</label>
+                        <input type="file" id="local-wav-loader" multiple accept=".wav" style="display:none;">
+                    </div>
+                    
+                    <!-- MIDI IO Selection -->
+                    <div style="display: flex; gap: 15px; margin-right: auto;">
+                        <div class="control-group">
+                            <label style="font-size: 0.75rem;">MIDI In</label>
+                            <select id="midi-in-select">
+                                <option value="">-- Select MIDI Input --</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label style="font-size: 0.75rem;">MIDI Out</label>
+                            <select id="midi-out-select">
+                                <option value="">-- Select MIDI Output --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button id="btn-rnd-all" class="btn-rnd" style="margin-right: 15px; padding: 10px 15px; font-size: 0.85rem; border-color: var(--danger); color: var(--danger); box-shadow: 0 0 10px rgba(255,82,82,0.3);">RND ALL</button>
+                    <button id="btn-melody-to-chords" class="btn-accent" style="margin-right: 15px;">🎹 Melody to Chords</button>
+
+                    <button id="btn-export-midi">Export MIDI</button>
+                    <button id="btn-export-wav">Export WAV</button>
+                    <button id="btn-export-json">Export JSON</button>
+                    <button id="btn-import-json">Import JSON</button>
+                    <input type="file" id="local-json-loader" accept=".json" style="display:none;">
+                    <button id="btn-info" class="btn-accent">Info</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Fills Section -->
+        <section id="fills-section-panel" class="panel fills-panel hidden-by-autofill">
+            <h2 class="collapsible-header"><span class="chevron">▼</span> Fills Engine</h2>
+            <div class="collapsible-content" id="fills-container">
+                <div class="fill-card" draggable="true" data-fill-id="1">
+                    <div class="fill-header">
+                        <span class="drag-handle">☰</span> Fill 1
+                        <button class="btn-delete-fill-card" title="Remove Fill">✕</button>
+                    </div>
+                    <div class="fill-controls">
+                        <label>Replace Steps: <input type="number" class="fill-steps" value="4" min="1"></label>
+                        <label>Kick: <input type="text" class="fill-kick" value="1010"> <button class="btn-rnd">RND</button></label>
+                        <label>Snare: <input type="text" class="fill-snare" value="1111"> <button class="btn-rnd">RND</button></label>
+                        <label>Tom 1: <input type="text" class="fill-tom1" value="1100"> <button class="btn-rnd">RND</button></label>
+                        <label>Tom 2: <input type="text" class="fill-tom2" value="0011"> <button class="btn-rnd">RND</button></label>
+                        <label>Clap: <input type="text" class="fill-clap" value="0000"> <button class="btn-rnd">RND</button></label>
+                        <label class="checkbox-label"><input type="checkbox" class="fill-crash"> Crash on Next</label>
+                        <label>Vol: <input type="range" class="fill-vol" min="0" max="1" step="0.01" value="0.8"></label>
+                    </div>
+                </div>
+                <button id="btn-add-fill" class="btn-accent" style="margin-top: 15px;">+ Create New Fill</button>
+            </div>
+        </section>
+
+        <!-- Structure Components Container -->
+        <div id="sections-container">
+            
+            <!-- Song Section A -->
+            <section class="panel song-section active-tab" data-section="A" style="--section-color: #4CAF50;">
+                <div class="section-header collapsible-header">
+                    <div class="section-title-group">
+                        <span class="chevron" style="font-size: 1.2rem;">▼</span>
+                        <span class="section-letter-prefix" style="font-size: 1.3rem; font-weight: bold; color: var(--text-main);">A - </span>
+                        <input type="text" class="section-name-input" value="Verse" data-letter="A">
+                        <input type="color" class="section-color-picker" value="#4CAF50">
+                    </div>
+                    <button class="btn-play-section btn-accent" title="Play just this section">▶ Play Section A</button>
+                </div>
+
+                <div class="section-content collapsible-content">
+                    <!-- Chords -->
+                    <div class="instrument-group">
+                        <h3 class="collapsible-header"><span class="chevron">▼</span> Chords</h3>
+                        <div class="collapsible-content">
+                            <div class="controls-row">
+                                <label>Progression: <input type="text" class="chord-prog" value="I16-V16-vi16-IV16"></label>
+                                <button class="btn-rnd">RND</button>
+                                <label>Sound: 
+                                    <select class="chord-sound">
+                                        <option value="chord1.wav">Chord 1</option>
+                                        <option value="chord2.wav">Chord 2</option>
+                                        <option value="chord3.wav">Chord 3</option>
+                                        <option value="chord4.wav">Chord 4</option>
+                                    </select>
+                                </label>
+                                <label>Vol: <input type="range" class="chord-vol" min="0" max="1" step="0.01" value="0.8"></label>
+                                <label class="checkbox-label"><input type="checkbox" class="chord-ducking"> Ducking</label>
+                                <label class="checkbox-label"><input type="checkbox" class="chord-arp-toggle"> Arp</label>
+                                <label>Arp Pattern: <input type="text" class="chord-arp-pattern" value="1231234-1231234-"></label>
+                                <button class="btn-rnd">RND</button>
+                            </div>
+                            <div class="adsr-container">
+                                <label>ADSR</label>
+                                <canvas class="adsr-canvas" width="200" height="60"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bass -->
+                    <div class="instrument-group">
+                        <h3 class="collapsible-header"><span class="chevron">▼</span> Bass</h3>
+                        <div class="collapsible-content controls-row">
+                            <label>Rhythm: <input type="text" class="bass-rhythm" value="1111-11101110143"></label>
+                            <button class="btn-rnd">RND</button>
+                            <label>Sound: 
+                                <select class="bass-sound">
+                                    <option value="bass1.wav">Bass 1</option>
+                                    <option value="bass2.wav">Bass 2</option>
+                                </select>
+                            </label>
+                            <label>Vol: <input type="range" class="bass-vol" min="0" max="1" step="0.01" value="0.8"></label>
+                            <label class="checkbox-label"><input type="checkbox" class="bass-ducking"> Ducking</label>
+                        </div>
+                    </div>
+
+                    <!-- Leads -->
+                    <div class="instrument-group leads-container">
+                        <div class="section-header lead-header collapsible-header">
+                            <div style="display: flex; align-items: center;">
+                                <span class="chevron">▼</span>
+                                <h3>Lead(s)</h3>
+                            </div>
+                            <button class="btn-add-lead btn-small btn-accent">+ Add Lead</button>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="lead-card">
+                                <button class="btn-delete-lead" title="Remove Lead">✕</button>
+                                <div class="controls-row">
+                                    <label>Rhythm: <input type="text" class="lead-rhythm" value="4---1---3---1--4"></label>
+                                    <button class="btn-rnd" title="Randomize Pattern">RND</button>
+                                    <button class="btn-rnd btn-transpose-down" title="Transpose Down">-1</button>
+                                    <button class="btn-rnd btn-transpose-up" title="Transpose Up">+1</button>
+                                    <label>Sound: 
+                                        <select class="lead-sound">
+                                            <option value="lead1.wav">Lead 1</option>
+                                            <option value="lead2.wav">Lead 2</option>
+                                            <option value="lead3.wav">Lead 3</option>
+                                            <option value="lead4.wav">Lead 4</option>
+                                        </select>
+                                    </label>
+                                    <label>Vol: <input type="range" class="lead-vol" min="0" max="1" step="0.01" value="0.8"></label>
+                                    <label class="checkbox-label"><input type="checkbox" class="lead-ducking"> Ducking</label>
+                                </div>
+                                <div class="controls-row fx-row">
+                                    <label>Flanger: <input type="range" class="lead-flanger" min="0" max="1" step="0.01" value="0"></label>
+                                    <label>Delay: <input type="range" class="lead-delay" min="0" max="1" step="0.01" value="0.2"></label>
+                                    <label>Reverb: <input type="range" class="lead-reverb" min="0" max="1" step="0.01" value="0.3"></label>
+                                </div>
+                                <div class="adsr-container">
+                                    <label>ADSR</label>
+                                    <canvas class="adsr-canvas" width="200" height="60"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Drums -->
+                    <div class="instrument-group">
+                        <h3 class="collapsible-header"><span class="chevron">▼</span> Drums</h3>
+                        <div class="collapsible-content">
+                            <div class="controls-row">
+                                <label>Kick: <input type="text" class="drum-kick" value="1000000010000000"></label>
+                                <button class="btn-rnd">RND</button>
+                                <label>Snare: <input type="text" class="drum-snare" value="0000100000001000"></label>
+                                <button class="btn-rnd">RND</button>
+                                <label>Hi-Hat: <input type="text" class="drum-hihat" value="1010101010101010"></label>
+                                <button class="btn-rnd">RND</button>
+                            </div>
+                            <div class="controls-row fx-row">
+                                <label>Comp Thresh: <input type="range" class="drum-comp-thresh" min="-40" max="0" value="-15"></label>
+                                <label>Comp Ratio: <input type="range" class="drum-comp-ratio" min="1" max="20" value="4"></label>
+                                <label>Vol: <input type="range" class="drum-vol" min="0" max="1" step="0.01" value="0.8"></label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="melody-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px;">
+            <span id="close-melody-modal" class="close-btn">&times;</span>
+            <h2>🎹 Melody to Chords Harmonizer</h2>
+            <div class="controls-row" style="margin-bottom: 20px;">
+                <label>Record Steps: <input type="number" id="melody-steps-input" value="16" min="4" max="64" step="4"></label>
+                <button id="btn-melody-rec" class="btn-accent" style="margin-left: auto;">⏺ Rec</button>
+            </div>
+            <div id="melody-notes-display" class="notes-display"></div>
+            <div id="melody-piano" class="graphic-piano"></div>
+            <div id="melody-chord-results" class="chord-results-container"></div>
+            <div class="controls-row" style="margin-top: 25px; border-top: 1px solid var(--border-color); padding-top: 15px;">
+                <label>Target Section:
+                    <select id="melody-target-section">
+                        <option value="A">Section A</option>
+                    </select>
+                </label>
+                <button id="btn-melody-cancel" class="btn-secondary">Cancel</button>
+                <button id="btn-melody-use" class="btn-accent">Use Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="info-modal" class="modal hidden">
+        <div class="modal-content" style="max-height: 80vh; display: flex; flex-direction: column;">
+            <span id="close-info-top" class="close-btn">&times;</span>
+            <div id="info-text" class="info-scroll-container" style="overflow-y: auto; padding-right: 15px; margin-bottom: 15px; flex-grow: 1;"></div>
+            <div style="text-align: center; border-top: 1px solid var(--border-color); padding-top: 15px;">
+                <button id="btn-close-info-bottom" class="btn-secondary" style="width: 150px;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="12EDOscaleList.js"></script>
+    <script src="audio.js"></script>
+    <script src="chords.js"></script>
+    <script src="bass.js"></script>
+    <script src="lead.js"></script>
+    <script src="drums.js"></script>
+    <script src="fills.js"></script>
+    <script src="modulation.js"></script>
+    <script src="master.js"></script>
+    <script src="melody.js"></script>
+    <script src="info.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
