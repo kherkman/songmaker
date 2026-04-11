@@ -111,7 +111,7 @@
                 <p>When recording stops, the algorithm will generate the best chord progressions that fit your melody. Select one and inject it straight into your desired Section!</p>
 
                 <h3>7. Audio Engine & Routing</h3>
-                <p>Because this app runs locally without a server, it cannot automatically fetch files from folders. You must click <strong>📁 Load WAVs</strong> and select your instrument sounds (e.g., <code>kick.wav</code>, <code>bass1.wav</code>) from your computer before pressing Play.</p>
+                <p>The app will automatically download the default instrument sounds from the server the first time you click anywhere on the page. You can also click <strong>📁 Load WAVs</strong> to load your own custom instrument sounds (e.g., <code>kick.wav</code>, <code>bass1.wav</code>) from your computer.</p>
                 <p><strong>MIDI Routing & Settings Reference:</strong></p>
                 <ul>
                     <li>The <code>baseMidi</code> value used for calculating pitch-shifted sample playback is <strong>60 (Middle C)</strong>. Ensure your instrument samples are recorded near C4.</li>
