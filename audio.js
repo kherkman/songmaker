@@ -72,6 +72,11 @@
             document.body.addEventListener('click', () => {
                 this.initAudioContext();
                 if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+                
+                // If buffers are empty, fetch the files from the server automatically
+                if (Object.keys(this.buffers).length === 0) {
+                    this.fetchServerFiles();
+                }
             }, { once: true });
 
             const fileInput = document.getElementById('local-wav-loader');
@@ -91,12 +96,49 @@
                             this.applyCrossfadeLoop(decodedBuffer, 0.4, 1.4, 0.1); 
                         }
                         this.buffers[file.name] = decodedBuffer;
-                        console.log(`Loaded and processed: ${file.name}`);
+                        console.log(`Loaded and processed locally: ${file.name}`);
                     });
                 };
                 reader.readAsArrayBuffer(file);
             });
-            alert(`${files.length} audio files loaded into memory.`);
+            alert(`${files.length} custom audio files loaded into memory.`);
+        },
+
+        async fetchServerFiles() {
+            this.initAudioContext();
+            
+            // List all the exact filenames expected in the root folder
+            const filesToFetch = [
+                'kick.wav', 'snare.wav', 'hihat.wav', 'tom1.wav', 'tom2.wav', 'clap.wav', 'crash.wav',
+                'bass1.wav', 'bass2.wav', 
+                'chord1.wav', 'chord2.wav', 'chord3.wav', 'chord4.wav', 
+                'lead1.wav', 'lead2.wav', 'lead3.wav', 'lead4.wav'
+            ];
+
+            console.log("Fetching default audio files from server...");
+
+            for (const fileName of filesToFetch) {
+                try {
+                    const response = await fetch(`./${fileName}`);
+                    if (!response.ok) {
+                        console.warn(`Could not find ${fileName} on server.`);
+                        continue;
+                    }
+                    
+                    const arrayBuffer = await response.arrayBuffer();
+                    
+                    this.ctx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
+                        const name = fileName.toLowerCase();
+                        if (name.includes('bass') || name.includes('lead') || name.includes('chord')) {
+                            this.applyCrossfadeLoop(decodedBuffer, 0.4, 1.4, 0.1); 
+                        }
+                        this.buffers[fileName] = decodedBuffer;
+                        console.log(`Fetched and processed: ${fileName}`);
+                    });
+                } catch (error) {
+                    console.error(`Failed to fetch ${fileName}:`, error);
+                }
+            }
         },
 
         applyCrossfadeLoop(buffer, loopStartSec, loopEndSec, fadeDurationSec) {
@@ -204,7 +246,6 @@
 
             let origSeq = window.SongComposer.Main.buildGlobalSequence;
             if (mode === 'local' && target) {
-                // FIXED: Uses new format required by Master.js compilation
                 window.SongComposer.Main.buildGlobalSequence = () => [{
                     type: 'section', section: target.dataset.section, fills: [], autoCrash: false, autoFill: false
                 }];
