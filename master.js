@@ -488,192 +488,293 @@
                 globalStepOffset += totalSectionSteps;
             });
 
+            // Auto Fill Ending Logic
+            const isAuto = this.elements.autoFillsToggle ? this.elements.autoFillsToggle.checked : false;
+            if (isAuto && sequence.length > 0) {
+                // Ignore mods for picking the last section
+                let lastSeqItem = null;
+                for (let i = sequence.length - 1; i >= 0; i--) {
+                    if (sequence[i].type === 'section') { lastSeqItem = sequence[i]; break; }
+                }
+                
+                if (lastSeqItem) {
+                    const lastSecEl = document.querySelector(`.song-section[data-section="${lastSeqItem.section}"]`);
+                    if (lastSecEl) {
+                        const bufferChords = lastSecEl.querySelector('.chord-sound').value;
+                        const bufferBass = lastSecEl.querySelector('.bass-sound').value;
+                        
+                        let volChordFinal = parseFloat(lastSecEl.querySelector('.chord-vol').value) || 0.8;
+                        let volBassFinal = parseFloat(lastSecEl.querySelector('.bass-vol').value) || 0.8;
+                        let volDrumFinal = parseFloat(lastSecEl.querySelector('.drum-vol').value) || 0.8;
+
+                        const drumBusParams = window.SongComposer.Drums.getBusCompression(lastSecEl);
+                        const adsrChords = window.SongComposer.Chords.getADSRData(lastSecEl);
+                        const scaleArr = window.SongComposer.Chords.buildScale(rootMidi, scaleStr);
+                        const tonicNotes = [scaleArr[0], scaleArr[2], scaleArr[4]]; 
+                        const finalDuration = 16; 
+
+                        events.push({
+                            type: 'drum', instrument: 'crash', bufferName: 'crash.wav', midiNote: 49,
+                            timeStep: globalStepOffset, durationSteps: finalDuration, drumBusParams, volume: volDrumFinal, section: lastSeqItem.section
+                        });
+                        events.push({
+                            type: 'drum', instrument: 'kick', bufferName: 'kick.wav', midiNote: 36,
+                            timeStep: globalStepOffset, durationSteps: finalDuration, drumBusParams, volume: volDrumFinal, section: lastSeqItem.section
+                        });
+
+                        tonicNotes.forEach(note => {
+                            events.push({
+                                type: 'melodic', instrument: 'chord', bufferName: bufferChords,
+                                midiNote: note + currentPitchOffset, timeStep: globalStepOffset, durationSteps: finalDuration, ducking: false, 
+                                adsr: { a: 0.01, d: adsrChords.d, s: adsrChords.s, r: adsrChords.r }, 
+                                volume: volChordFinal, section: lastSeqItem.section
+                            });
+                        });
+                        events.push({
+                            type: 'melodic', instrument: 'bass', bufferName: bufferBass, midiNote: rootMidi + currentPitchOffset, timeStep: globalStepOffset,
+                            durationSteps: finalDuration, ducking: false, adsr: null, volume: volBassFinal, section: lastSeqItem.section
+                        });
+
+                        globalStepOffset += finalDuration; 
+                    }
+                }
+            }
+
+            // Apply Humanize global variances
+            const tempo = this.getTempo();
+            const stepDurationSec = (60 / tempo) / 4;
+            const humanizeAmt = this.elements.humanize ? (parseFloat(this.elements.humanize.value) || 0) : 0;
+            
+            if (humanizeAmt > 0) {
+                events.forEach(ev => {
+                    let timeShift = (Math.random() * 2 - 1) * 0.25 * humanizeAmt * stepDurationSec; 
+                    ev.timeOffset = timeShift; 
+                    let volShift = (Math.random() * 2 - 1) * 0.20 * humanizeAmt;
+                    ev.volume = Math.max(0, Math.min(1, ev.volume + volShift));
+                });
+            }
+
             return { events, totalSteps: globalStepOffset };
         },
 
-        extractMelodicEvents(sectionSteps, events, globalStepOffset, instrument, bufferName, ducking, adsr, volume, fx, section, currentPitchOffset) {
-            sectionSteps.forEach(step => {
-                if (step.action === 'play' || step.action === 'bend') {
-                    events.push({
-                        type: 'melodic',
-                        instrument: instrument,
-                        bufferName: bufferName,
-                        midiNote: step.note !== null ? step.note + currentPitchOffset : null,
-                        timeStep: globalStepOffset + step.stepIndex,
-                        durationSteps: 1, 
-                        ducking: ducking,
-                        adsr: adsr,
-                        volume: volume,
-                        fx: fx,
-                        section: section,
-                        isBend: step.action === 'bend'
-                    });
-                } else if (step.action === 'hold' && events.length > 0) {
-                    let lastEvent = null;
-                    for (let i = events.length - 1; i >= 0; i--) {
-                        if (events[i].instrument === instrument && events[i].section === section) {
-                            lastEvent = events[i];
-                            break;
-                        }
+        extractMelodicEvents(parsedTrack, eventsArray, globalOffset, instName, bufName, duck, adsr, vol, fx = null, targetSection = null, pitchOffset = 0) {
+            let activeNote = null;
+            let noteStartStep = 0;
+            
+            for (let i = 0; i < parsedTrack.length; i++) {
+                const stepData = parsedTrack[i];
+                if (stepData.action === 'play') {
+                    if (activeNote !== null) {
+                        eventsArray.push({
+                            type: 'melodic', instrument: instName, bufferName: bufName,
+                            midiNote: activeNote + pitchOffset, timeStep: globalOffset + noteStartStep,
+                            durationSteps: i - noteStartStep, ducking: duck, adsr: adsr, volume: vol, fx: fx, section: targetSection
+                        });
                     }
-                    if (lastEvent) {
-                        lastEvent.durationSteps++;
+                    activeNote = stepData.note;
+                    noteStartStep = i;
+                } else if (stepData.action === 'rest') {
+                    if (activeNote !== null) {
+                        eventsArray.push({
+                            type: 'melodic', instrument: instName, bufferName: bufName,
+                            midiNote: activeNote + pitchOffset, timeStep: globalOffset + noteStartStep,
+                            durationSteps: i - noteStartStep, ducking: duck, adsr: adsr, volume: vol, fx: fx, section: targetSection
+                        });
+                        activeNote = null;
                     }
                 }
-            });
+            }
+            if (activeNote !== null) {
+                eventsArray.push({
+                    type: 'melodic', instrument: instName, bufferName: bufName,
+                    midiNote: activeNote + pitchOffset, timeStep: globalOffset + noteStartStep,
+                    durationSteps: parsedTrack.length - noteStartStep, ducking: duck, adsr: adsr, volume: vol, fx: fx, section: targetSection
+                });
+            }
         },
 
-        extractDrumEvents(drumsData, events, globalStepOffset, volume, drumBusParams, section) {
-            const instruments = ['kick', 'snare', 'hihat', 'tom1', 'tom2', 'clap'];
-            instruments.forEach(inst => {
-                if (drumsData[inst]) {
-                    drumsData[inst].forEach(step => {
-                        if (step.play) {
-                            events.push({
-                                type: 'drum',
-                                instrument: inst,
-                                bufferName: `${inst}.wav`,
-                                timeStep: globalStepOffset + step.stepIndex,
-                                durationSteps: 1,
-                                volume: volume,
-                                section: section,
-                                compression: drumBusParams
+        extractDrumEvents(drumData, eventsArray, globalOffset, vol, busParams, sectionTarget) {
+            // Read individual drum levels from UI if section target matches
+            let volKick = 0.90, volSnare = 0.85, volHihat = 0.75;
+            if (sectionTarget) {
+                const secEl = document.querySelector(`.song-section[data-section="${sectionTarget}"]`);
+                if (secEl) {
+                    const kEl = secEl.querySelector('.drum-kick-vol');
+                    const sEl = secEl.querySelector('.drum-snare-vol');
+                    const hEl = secEl.querySelector('.drum-hihat-vol');
+                    if (kEl) volKick = parseFloat(kEl.value);
+                    if (sEl) volSnare = parseFloat(sEl.value);
+                    if (hEl) volHihat = parseFloat(hEl.value);
+                }
+            }
+
+            const drumMap = [
+                { key: 'kick', sound: 'kick.wav', midi: 36, pieceVol: volKick },
+                { key: 'snare', sound: 'snare.wav', midi: 38, pieceVol: volSnare },
+                { key: 'hihat', sound: 'hihat.wav', midi: 42, pieceVol: volHihat }
+            ];
+            
+            drumMap.forEach(d => {
+                if (drumData[d.key]) {
+                    drumData[d.key].forEach(hit => {
+                        if (hit.play) {
+                            eventsArray.push({
+                                type: 'drum', instrument: d.key, bufferName: d.sound, midiNote: d.midi,
+                                timeStep: globalOffset + hit.stepIndex, durationSteps: 1, drumBusParams: busParams,
+                                volume: vol * d.pieceVol, section: sectionTarget
                             });
                         }
                     });
                 }
             });
-            if (drumsData.crashFlag) {
-                events.push({
-                    type: 'drum',
-                    instrument: 'crash',
-                    bufferName: 'crash.wav',
-                    timeStep: globalStepOffset,
-                    durationSteps: 4,
-                    volume: volume,
-                    section: section,
-                    compression: drumBusParams
+
+            if (drumData.crashFlag) {
+                eventsArray.push({
+                    type: 'drum', instrument: 'crash', bufferName: 'crash.wav', midiNote: 49,
+                    timeStep: globalOffset, durationSteps: 4, drumBusParams: busParams, volume: vol, section: sectionTarget
                 });
             }
         },
 
-        extractFillDrums(fd, events, globalStepOffset, fillVol, drumBusParams, section) {
-            const length = fd.replaceSteps;
+        extractFillDrums(fillData, eventsArray, globalOffset, vol, busParams, sectionTarget) {
             const instruments = ['kick', 'snare', 'tom1', 'tom2', 'clap'];
-            instruments.forEach(inst => {
-                const pattern = fd[inst] || '0';
-                for (let i = 0; i < length; i++) {
-                    const char = pattern[i % pattern.length];
-                    if (char === '1') {
-                        events.push({
-                            type: 'drum',
-                            instrument: inst,
-                            bufferName: `${inst}.wav`,
-                            timeStep: globalStepOffset + i,
-                            durationSteps: 1,
-                            volume: fillVol,
-                            section: section,
-                            compression: drumBusParams
+            const midiMap = { kick: 36, snare: 38, tom1: 48, tom2: 45, clap: 39 };
+            const soundMap = { kick: 'kick.wav', snare: 'snare.wav', tom1: 'tom1.wav', tom2: 'tom2.wav', clap: 'clap.wav' };
+            
+            // Read individual drum levels if section target matches
+            let volKick = 0.90, volSnare = 0.85, volHihat = 0.75;
+            if (sectionTarget) {
+                const secEl = document.querySelector(`.song-section[data-section="${sectionTarget}"]`);
+                if (secEl) {
+                    const kEl = secEl.querySelector('.drum-kick-vol');
+                    const sEl = secEl.querySelector('.drum-snare-vol');
+                    const hEl = secEl.querySelector('.drum-hihat-vol');
+                    if (kEl) volKick = parseFloat(kEl.value);
+                    if (sEl) volSnare = parseFloat(sEl.value);
+                    if (hEl) volHihat = parseFloat(hEl.value);
+                }
+            }
+
+            for (let i = 0; i < fillData.replaceSteps; i++) {
+                instruments.forEach(inst => {
+                    const pattern = fillData[inst] || '0';
+                    if (pattern[i % pattern.length] === '1') {
+                        let finalVol = vol;
+                        if (inst === 'kick') finalVol *= volKick;
+                        else if (inst === 'snare') finalVol *= volSnare;
+
+                        eventsArray.push({
+                            type: 'drum', instrument: inst, bufferName: soundMap[inst], midiNote: midiMap[inst],
+                            timeStep: globalOffset + i, durationSteps: 1, drumBusParams: busParams,
+                            volume: finalVol, section: sectionTarget
                         });
                     }
-                }
-            });
-            if (fd.crashOnNext) {
-                events.push({
-                    type: 'drum',
-                    instrument: 'crash',
-                    bufferName: 'crash.wav',
-                    timeStep: globalStepOffset + length,
-                    durationSteps: 4,
-                    volume: fillVol,
-                    section: section,
-                    compression: drumBusParams
                 });
             }
         },
 
         exportJSON() {
-            const data = {
-                structure: document.getElementById('song-structure-input')?.value || '',
-                tempo: this.getTempo(),
-                root: this.elements.root.value,
-                scale: this.elements.scale.value,
-                vol: this.elements.vol.value,
-                humanize: this.elements.humanize.value,
-                autoFills: this.elements.autoFillsToggle.checked,
-                sections: {}
+            const state = {
+                master: {
+                    root: this.elements.root.value, scale: this.elements.scale.value,
+                    tempo: this.elements.tempo.value, vol: this.elements.vol.value,
+                    humanize: this.elements.humanize.value,
+                    autoFills: this.elements.autoFillsToggle.checked,
+                    
+                    // Master Effects controls values added to export
+                    limGain: document.getElementById('master-lim-gain')?.value || '2.0',
+                    limCeiling: document.getElementById('master-lim-ceiling')?.value || '-0.5',
+                    limAttack: document.getElementById('master-lim-attack')?.value || '0.005',
+                    limRelease: document.getElementById('master-lim-release')?.value || '0.05',
+                    hpfFreq: document.getElementById('master-hpf-freq')?.value || '20',
+                    lpfFreq: document.getElementById('master-lpf-freq')?.value || '20000',
+                    satDrive: document.getElementById('master-sat-drive')?.value || '3',
+                    satHpf: document.getElementById('master-sat-hpf')?.value || '150',
+                    satMix: document.getElementById('master-sat-mix')?.value || '0.50',
+                    mbThresh: document.getElementById('master-mb-thresh')?.value || '-16.0',
+                    mbRatio: document.getElementById('master-mb-ratio')?.value || '2.5'
+                },
+                structure: document.getElementById('song-structure-input').value,
+                timelineData: [],
+                fills: [],
+                sections: []
             };
 
+            // Save actual visual block arrangement for MOD and manual fill preservation
+            if (this.elements.timelineTracks) {
+                state.timelineData = Array.from(this.elements.timelineTracks.children).map(el => {
+                    if (el.classList.contains('timeline-block') && el.dataset.target) return { type: 'section', letter: el.dataset.target };
+                    if (el.classList.contains('timeline-mod-block')) return { type: 'mod', steps: parseInt(el.dataset.modSteps) };
+                    if (el.classList.contains('timeline-fill-marker') && el.classList.contains('filled')) {
+                        const lbl = el.querySelector('.fill-label');
+                        if (lbl) return { type: 'fill', id: lbl.textContent.replace('F', '') };
+                    }
+                    return null;
+                }).filter(x => x);
+            }
+
+            document.querySelectorAll('.fill-card').forEach(card => {
+                state.fills.push({
+                    id: card.dataset.fillId,
+                    replaceSteps: card.querySelector('.fill-steps').value,
+                    kick: card.querySelector('.fill-kick').value,
+                    snare: card.querySelector('.fill-snare').value,
+                    tom1: card.querySelector('.fill-tom1').value,
+                    tom2: card.querySelector('.fill-tom2').value,
+                    clap: card.querySelector('.fill-clap') ? card.querySelector('.fill-clap').value : '0',
+                    crash: card.querySelector('.fill-crash').checked,
+                    vol: card.querySelector('.fill-vol') ? card.querySelector('.fill-vol').value : '0.8'
+                });
+            });
+
             document.querySelectorAll('.song-section').forEach(sec => {
-                const letter = sec.dataset.section;
-                const leadsData = [];
-                sec.querySelectorAll('.lead-card').forEach(leadCard => {
-                    leadsData.push({
-                        rhythm: leadCard.querySelector('.lead-rhythm')?.value || '',
-                        sound: leadCard.querySelector('.lead-sound')?.value || '',
-                        vol: leadCard.querySelector('.lead-vol')?.value || '0.75',
-                        ducking: leadCard.querySelector('.lead-ducking')?.checked || false,
-                        flanger: leadCard.querySelector('.lead-flanger')?.value || '0',
-                        delay: leadCard.querySelector('.lead-delay')?.value || '0.2',
-                        reverb: leadCard.querySelector('.lead-reverb')?.value || '0.8',
-                        adsr: window.SongComposer.Lead.getADSRData(leadCard)
+                const secState = { 
+                    id: sec.dataset.section, 
+                    color: sec.querySelector('.section-color-picker').value, 
+                    name: sec.querySelector('.section-name-input') ? sec.querySelector('.section-name-input').value : '',
+                    leads: [] 
+                };
+                
+                secState.chords = {
+                    prog: sec.querySelector('.chord-prog').value, sound: sec.querySelector('.chord-sound').value,
+                    ducking: sec.querySelector('.chord-ducking').checked, arp: sec.querySelector('.chord-arp-toggle').checked,
+                    arpPattern: sec.querySelector('.chord-arp-pattern').value,
+                    vol: sec.querySelector('.chord-vol') ? sec.querySelector('.chord-vol').value : '0.65',
+                    adsr: window.SongComposer.Chords.getADSRData(sec)
+                };
+                secState.bass = {
+                    rhythm: sec.querySelector('.bass-rhythm').value, sound: sec.querySelector('.bass-sound').value,
+                    ducking: sec.querySelector('.bass-ducking').checked,
+                    vol: sec.querySelector('.bass-vol') ? sec.querySelector('.bass-vol').value : '0.85'
+                };
+                sec.querySelectorAll('.lead-card').forEach(lead => {
+                    secState.leads.push({
+                        rhythm: lead.querySelector('.lead-rhythm').value, sound: lead.querySelector('.lead-sound').value,
+                        ducking: lead.querySelector('.lead-ducking').checked,
+                        vol: lead.querySelector('.lead-vol') ? lead.querySelector('.lead-vol').value : '0.75',
+                        flanger: lead.querySelector('.lead-flanger') ? lead.querySelector('.lead-flanger').value : '0',
+                        delay: lead.querySelector('.lead-delay') ? lead.querySelector('.lead-delay').value : '0.2',
+                        reverb: lead.querySelector('.lead-reverb') ? lead.querySelector('.lead-reverb').value : '0.3',
+                        adsr: window.SongComposer.Lead.getADSRData(lead)
                     });
                 });
-
-                data.sections[letter] = {
-                    name: sec.querySelector('.section-name-input')?.value || '',
-                    color: sec.querySelector('.section-color-picker')?.value || '#4CAF50',
-                    chordProg: sec.querySelector('.chord-prog')?.value || '',
-                    chordSound: sec.querySelector('.chord-sound')?.value || '',
-                    chordVol: sec.querySelector('.chord-vol')?.value || '0.65',
-                    chordDucking: sec.querySelector('.chord-ducking')?.checked || false,
-                    chordArpToggle: sec.querySelector('.chord-arp-toggle')?.checked || false,
-                    chordArpPattern: sec.querySelector('.chord-arp-pattern')?.value || '',
-                    chordADSR: window.SongComposer.Chords.getADSRData(sec),
-                    bassRhythm: sec.querySelector('.bass-rhythm')?.value || '',
-                    bassSound: sec.querySelector('.bass-sound')?.value || '',
-                    bassVol: sec.querySelector('.bass-vol')?.value || '0.85',
-                    bassDucking: sec.querySelector('.bass-ducking')?.checked || false,
-                    drumKick: sec.querySelector('.drum-kick')?.value || '',
-                    drumSnare: sec.querySelector('.drum-snare')?.value || '',
-                    drumHihat: sec.querySelector('.drum-hihat')?.value || '',
-                    drumKickVol: sec.querySelector('.drum-kick-vol')?.value || '0.90',
-                    drumSnareVol: sec.querySelector('.drum-snare-vol')?.value || '0.85',
-                    drumHihatVol: sec.querySelector('.drum-hihat-vol')?.value || '0.75',
-                    drumCompThresh: sec.querySelector('.drum-comp-thresh')?.value || '-35',
-                    drumCompRatio: sec.querySelector('.drum-comp-ratio')?.value || '4',
-                    drumVol: sec.querySelector('.drum-vol')?.value || '0.80',
-                    leads: leadsData
+                secState.drums = {
+                    kick: sec.querySelector('.drum-kick').value, snare: sec.querySelector('.drum-snare').value,
+                    hihat: sec.querySelector('.drum-hihat').value,
+                    kickVol: sec.querySelector('.drum-kick-vol') ? sec.querySelector('.drum-kick-vol').value : '0.90',
+                    snareVol: sec.querySelector('.drum-snare-vol') ? sec.querySelector('.drum-snare-vol').value : '0.85',
+                    hihatVol: sec.querySelector('.drum-hihat-vol') ? sec.querySelector('.drum-hihat-vol').value : '0.75',
+                    compThresh: sec.querySelector('.drum-comp-thresh').value, compRatio: sec.querySelector('.drum-comp-ratio').value,
+                    vol: sec.querySelector('.drum-vol') ? sec.querySelector('.drum-vol').value : '0.8'
                 };
+                state.sections.push(secState);
             });
 
-            data.fills = [];
-            document.querySelectorAll('.fill-card').forEach(card => {
-                data.fills.push({
-                    id: card.dataset.fillId,
-                    replaceSteps: card.querySelector('.fill-steps')?.value || '4',
-                    kick: card.querySelector('.fill-kick')?.value || '1010',
-                    snare: card.querySelector('.fill-snare')?.value || '1111',
-                    tom1: card.querySelector('.fill-tom1')?.value || '1100',
-                    tom2: card.querySelector('.fill-tom2')?.value || '0011',
-                    clap: card.querySelector('.fill-clap')?.value || '0000',
-                    crash: card.querySelector('.fill-crash')?.checked || false,
-                    vol: card.querySelector('.fill-vol')?.value || '0.80'
-                });
-            });
-
-            data.mods = [];
-            document.querySelectorAll('.timeline-mod-block').forEach(mod => {
-                data.mods.push({
-                    steps: parseInt(mod.dataset.modSteps, 10)
-                });
-            });
-
-            const blob = new Blob([JSON.stringify(data, null, 4)], { type: 'application/json' });
+            const blob = new Blob([JSON.stringify(state, null, 2)], {type: "application/json"});
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
+            const a = document.createElement("a");
             a.href = url;
-            a.download = 'song_project.json';
+            a.download = "song_composer_project.json";
             a.click();
             URL.revokeObjectURL(url);
         },
@@ -683,306 +784,300 @@
             const reader = new FileReader();
             reader.onload = (e) => {
                 try {
-                    const data = JSON.parse(e.target.result);
+                    const state = JSON.parse(e.target.result);
                     
-                    if (data.structure !== undefined) document.getElementById('song-structure-input').value = data.structure;
-                    if (data.tempo !== undefined) this.elements.tempo.value = data.tempo;
-                    if (data.root !== undefined) this.elements.root.value = data.root;
-                    if (data.scale !== undefined) {
-                        this.elements.scale.value = data.scale;
+                    if (state.master) {
+                        this.elements.root.value = state.master.root;
+                        this.elements.scale.value = state.master.scale;
+                        this.elements.tempo.value = state.master.tempo;
+                        this.elements.vol.value = state.master.vol;
+                        if (state.master.humanize !== undefined) this.elements.humanize.value = state.master.humanize;
+                        this.elements.autoFillsToggle.checked = state.master.autoFills;
+                        
+                        // Import Master Effects controls values
+                        if (state.master.limGain !== undefined && document.getElementById('master-lim-gain')) {
+                            document.getElementById('master-lim-gain').value = state.master.limGain;
+                        }
+                        if (state.master.limCeiling !== undefined && document.getElementById('master-lim-ceiling')) {
+                            document.getElementById('master-lim-ceiling').value = state.master.limCeiling;
+                        }
+                        if (state.master.limAttack !== undefined && document.getElementById('master-lim-attack')) {
+                            document.getElementById('master-lim-attack').value = state.master.limAttack;
+                        }
+                        if (state.master.limRelease !== undefined && document.getElementById('master-lim-release')) {
+                            document.getElementById('master-lim-release').value = state.master.limRelease;
+                        }
+                        if (state.master.hpfFreq !== undefined && document.getElementById('master-hpf-freq')) {
+                            document.getElementById('master-hpf-freq').value = state.master.hpfFreq;
+                        }
+                        if (state.master.lpfFreq !== undefined && document.getElementById('master-lpf-freq')) {
+                            document.getElementById('master-lpf-freq').value = state.master.lpfFreq;
+                        }
+                        if (state.master.satDrive !== undefined && document.getElementById('master-sat-drive')) {
+                            document.getElementById('master-sat-drive').value = state.master.satDrive;
+                        }
+                        if (state.master.satHpf !== undefined && document.getElementById('master-sat-hpf')) {
+                            document.getElementById('master-sat-hpf').value = state.master.satHpf;
+                        }
+                        if (state.master.satMix !== undefined && document.getElementById('master-sat-mix')) {
+                            document.getElementById('master-sat-mix').value = state.master.satMix;
+                        }
+                        if (state.master.mbThresh !== undefined && document.getElementById('master-mb-thresh')) {
+                            document.getElementById('master-mb-thresh').value = state.master.mbThresh;
+                        }
+                        if (state.master.mbRatio !== undefined && document.getElementById('master-mb-ratio')) {
+                            document.getElementById('master-mb-ratio').value = state.master.mbRatio;
+                        }
+
+                        this.updateAutoFillsState();
                         if (window.SongComposer.Main) window.SongComposer.Main.updateScaleSumDisplay();
+                        
+                        // Let audio.js read the newly imported effects levels
+                        if (window.SongComposer.Audio && typeof window.SongComposer.Audio.readDOMFXDefaults === 'function') {
+                            window.SongComposer.Audio.readDOMFXDefaults();
+                        }
                     }
-                    if (data.vol !== undefined) {
-                        this.elements.vol.value = data.vol;
-                        if (window.SongComposer.Audio) window.SongComposer.Audio.setMasterVolume(data.vol);
-                    }
-                    if (data.humanize !== undefined) this.elements.humanize.value = data.humanize;
-                    if (data.autoFills !== undefined) this.elements.autoFillsToggle.checked = data.autoFills;
-
-                    if (data.fills) {
-                        this.elements.fillsContainer.querySelectorAll('.fill-card').forEach(c => c.remove());
-                        data.fills.forEach(fill => {
-                            const container = this.elements.fillsContainer;
-                            const card = document.createElement('div');
-                            card.className = 'fill-card';
-                            card.draggable = true;
-                            card.dataset.fillId = fill.id;
-                            card.innerHTML = `
-                                <div class="fill-header">
-                                    <span class="drag-handle">☰</span> Fill ${fill.id}
-                                    <button class="btn-delete-fill-card" title="Remove Fill">✕</button>
-                                </div>
-                                <div class="fill-controls">
-                                    <label>Replace Steps: <input type="number" class="fill-steps" value="${fill.replaceSteps}" min="1"></label>
-                                    <label>Kick: <input type="text" class="fill-kick" value="${fill.kick}"> <button class="btn-rnd">RND</button></label>
-                                    <label>Snare: <input type="text" class="fill-snare" value="${fill.snare}"> <button class="btn-rnd">RND</button></label>
-                                    <label>Tom 1: <input type="text" class="fill-tom1" value="${fill.tom1}"> <button class="btn-rnd">RND</button></label>
-                                    <label>Tom 2: <input type="text" class="fill-tom2" value="${fill.tom2}"> <button class="btn-rnd">RND</button></label>
-                                    <label>Clap: <input type="text" class="fill-clap" value="${fill.clap}"> <button class="btn-rnd">RND</button></label>
-                                    <label class="checkbox-label"><input type="checkbox" class="fill-crash" ${fill.crash ? 'checked' : ''}> Crash on Next</label>
-                                    <label>Vol: <input type="range" class="fill-vol" min="0" max="1" step="0.01" value="${fill.vol}"></label>
-                                </div>
-                            `;
-                            container.insertBefore(card, document.getElementById('btn-add-fill'));
+                    
+                    if (state.fills) {
+                        const container = document.getElementById('fills-container');
+                        container.querySelectorAll('.fill-card').forEach((c, i) => { if(i>0) c.remove(); });
+                        state.fills.forEach((f, i) => {
+                            if (i > 0) window.SongComposer.Fills.addFillInstance();
+                            const cards = container.querySelectorAll('.fill-card');
+                            const card = cards[cards.length - 1];
+                            card.dataset.fillId = f.id;
+                            card.querySelector('.fill-header').innerHTML = `<span class="drag-handle">☰</span> Fill ${f.id} <button class="btn-delete-fill-card" title="Remove Fill">✕</button>`;
+                            card.querySelector('.fill-steps').value = f.replaceSteps;
+                            card.querySelector('.fill-kick').value = f.kick;
+                            card.querySelector('.fill-snare').value = f.snare;
+                            card.querySelector('.fill-tom1').value = f.tom1;
+                            card.querySelector('.fill-tom2').value = f.tom2;
+                            if(card.querySelector('.fill-clap')) card.querySelector('.fill-clap').value = f.clap;
+                            card.querySelector('.fill-crash').checked = f.crash;
+                            if(f.vol && card.querySelector('.fill-vol')) card.querySelector('.fill-vol').value = f.vol;
                         });
                     }
 
-                    if (data.sections) {
-                        Object.keys(data.sections).forEach(letter => {
-                            let sec = document.querySelector(`.song-section[data-section="${letter}"]`);
-                            if (!sec && window.SongComposer.Main) {
-                                sec = window.SongComposer.Main.createNewSectionEditor(letter);
+                    if (state.sections) {
+                        state.sections.forEach(s => {
+                            let secEl = document.querySelector(`.song-section[data-section="${s.id}"]`);
+                            if (!secEl) secEl = window.SongComposer.Main.createNewSectionEditor(s.id);
+                            
+                            secEl.querySelector('.section-color-picker').value = s.color;
+                            secEl.style.setProperty('--section-color', s.color);
+                            if (s.name && secEl.querySelector('.section-name-input')) secEl.querySelector('.section-name-input').value = s.name;
+                            
+                            if (s.chords) {
+                                secEl.querySelector('.chord-prog').value = s.chords.prog;
+                                secEl.querySelector('.chord-sound').value = s.chords.sound;
+                                secEl.querySelector('.chord-ducking').checked = s.chords.ducking;
+                                secEl.querySelector('.chord-arp-toggle').checked = s.chords.arp;
+                                secEl.querySelector('.chord-arp-pattern').value = s.chords.arpPattern;
+                                if (s.chords.vol && secEl.querySelector('.chord-vol')) secEl.querySelector('.chord-vol').value = s.chords.vol;
+                                if (s.chords.adsr && window.SongComposer.Chords.setADSRData) window.SongComposer.Chords.setADSRData(secEl, s.chords.adsr);
                             }
-                            if (sec) {
-                                const secData = data.sections[letter];
-                                if (secData.name) sec.querySelector('.section-name-input').value = secData.name;
-                                if (secData.color) {
-                                    sec.querySelector('.section-color-picker').value = secData.color;
-                                    sec.style.setProperty('--section-color', secData.color);
-                                }
-                                if (secData.chordProg) sec.querySelector('.chord-prog').value = secData.chordProg;
-                                if (secData.chordSound) sec.querySelector('.chord-sound').value = secData.chordSound;
-                                if (secData.chordVol) sec.querySelector('.chord-vol').value = secData.chordVol;
-                                if (secData.chordDucking !== undefined) sec.querySelector('.chord-ducking').checked = secData.chordDucking;
-                                if (secData.chordArpToggle !== undefined) sec.querySelector('.chord-arp-toggle').checked = secData.chordArpToggle;
-                                if (secData.chordArpPattern) sec.querySelector('.chord-arp-pattern').value = secData.chordArpPattern;
+                            if (s.bass) {
+                                secEl.querySelector('.bass-rhythm').value = s.bass.rhythm;
+                                secEl.querySelector('.bass-sound').value = s.bass.sound;
+                                secEl.querySelector('.bass-ducking').checked = s.bass.ducking;
+                                if (s.bass.vol && secEl.querySelector('.bass-vol')) secEl.querySelector('.bass-vol').value = s.bass.vol;
+                            }
+                            if (s.drums) {
+                                secEl.querySelector('.drum-kick').value = s.drums.kick;
+                                secEl.querySelector('.drum-snare').value = s.drums.snare;
+                                secEl.querySelector('.drum-hihat').value = s.drums.hihat;
                                 
-                                if (secData.chordADSR) {
-                                    window.SongComposer.Chords.setADSRData(sec, secData.chordADSR);
-                                }
+                                // Import individual drum levels dynamically
+                                if (s.drums.kickVol && secEl.querySelector('.drum-kick-vol')) secEl.querySelector('.drum-kick-vol').value = s.drums.kickVol;
+                                if (s.drums.snareVol && secEl.querySelector('.drum-snare-vol')) secEl.querySelector('.drum-snare-vol').value = s.drums.snareVol;
+                                if (s.drums.hihatVol && secEl.querySelector('.drum-hihat-vol')) secEl.querySelector('.drum-hihat-vol').value = s.drums.hihatVol;
 
-                                if (secData.bassRhythm) sec.querySelector('.bass-rhythm').value = secData.bassRhythm;
-                                if (secData.bassSound) sec.querySelector('.bass-sound').value = secData.bassSound;
-                                { sec.querySelector('.bass-vol').value = secData.bassVol; }
-                                if (secData.bassDucking !== undefined) sec.querySelector('.bass-ducking').checked = secData.bassDucking;
-
-                                if (secData.drumKick) sec.querySelector('.drum-kick').value = secData.drumKick;
-                                if (secData.drumSnare) sec.querySelector('.drum-snare').value = secData.drumSnare;
-                                if (secData.drumHihat) sec.querySelector('.drum-hihat').value = secData.drumHihat;
-                                if (secData.drumKickVol) sec.querySelector('.drum-kick-vol').value = secData.drumKickVol;
-                                if (secData.drumSnareVol) sec.querySelector('.drum-snare-vol').value = secData.drumSnareVol;
-                                if (secData.drumHihatVol) sec.querySelector('.drum-hihat-vol').value = secData.drumHihatVol;
-                                if (secData.drumCompThresh) sec.querySelector('.drum-comp-thresh').value = secData.drumCompThresh;
-                                if (secData.drumCompRatio) sec.querySelector('.drum-comp-ratio').value = secData.drumCompRatio;
-                                if (secData.drumVol) sec.querySelector('.drum-vol').value = secData.drumVol;
-
-                                if (secData.leads) {
-                                    const leadContainer = sec.querySelector('.leads-container .collapsible-content');
-                                    leadContainer.innerHTML = '';
-                                    secData.leads.forEach(lead => {
-                                        const card = document.createElement('div');
-                                        card.className = 'lead-card';
-                                        card.innerHTML = `
-                                            <button class="btn-delete-lead" title="Remove Lead">✕</button>
-                                            <div class="controls-row">
-                                                <label>Rhythm: <input type="text" class="lead-rhythm" value="${lead.rhythm}"></label>
-                                                <button class="btn-rnd" title="Randomize Pattern">RND</button>
-                                                <button class="btn-rnd btn-transpose-down" title="Transpose Down">-1</button>
-                                                <button class="btn-rnd btn-transpose-up" title="Transpose Up">+1</button>
-                                                <label>Sound: 
-                                                    <select class="lead-sound">
-                                                        <option value="lead1.wav" ${lead.sound === 'lead1.wav' ? 'selected' : ''}>Lead 1</option>
-                                                        <option value="lead2.wav" ${lead.sound === 'lead2.wav' ? 'selected' : ''}>Lead 2</option>
-                                                        <option value="lead3.wav" ${lead.sound === 'lead3.wav' ? 'selected' : ''}>Lead 3</option>
-                                                        <option value="lead4.wav" ${lead.sound === 'lead4.wav' ? 'selected' : ''}>Lead 4</option>
-                                                    </select>
-                                                </label>
-                                                <label>Vol: <input type="range" class="lead-vol" min="0" max="1" step="0.01" value="${lead.vol}"></label>
-                                                <label class="checkbox-label"><input type="checkbox" class="lead-ducking" ${lead.ducking ? 'checked' : ''}> Ducking</label>
-                                            </div>
-                                            <div class="controls-row fx-row">
-                                                <label>Flanger: <input type="range" class="lead-flanger" min="0" max="1" step="0.01" value="${lead.flanger}"></label>
-                                                <label>Delay: <input type="range" class="lead-delay" min="0" max="1" step="0.01" value="${lead.delay}"></label>
-                                                <label>Reverb: <input type="range" class="lead-reverb" min="0" max="1" step="0.01" value="${lead.reverb}"></label>
-                                            </div>
-                                            <div class="adsr-container">
-                                                <label>ADSR</label>
-                                                <canvas class="adsr-canvas" width="200" height="60"></canvas>
-                                            </div>
-                                        `;
-                                        leadContainer.appendChild(card);
-                                        if (window.SongComposer.Lead) {
-                                            window.SongComposer.Lead.initADSRCanvas(card.querySelector('.adsr-canvas'));
-                                            window.SongComposer.Lead.setADSRData(card, lead.adsr);
-                                        }
-                                    });
-                                }
+                                secEl.querySelector('.drum-comp-thresh').value = s.drums.compThresh;
+                                secEl.querySelector('.drum-comp-ratio').value = s.drums.compRatio;
+                                if (s.drums.vol && secEl.querySelector('.drum-vol')) secEl.querySelector('.drum-vol').value = s.drums.vol;
+                            }
+                            if (s.leads) {
+                                const lContainer = secEl.querySelector('.leads-container .collapsible-content');
+                                lContainer.querySelectorAll('.lead-card').forEach((c, i) => { if(i>0) c.remove(); });
+                                s.leads.forEach((l, i) => {
+                                    if (i > 0) window.SongComposer.Lead.addLeadInstance(secEl.querySelector('.leads-container'));
+                                    const cards = lContainer.querySelectorAll('.lead-card');
+                                    const card = cards[cards.length - 1];
+                                    card.querySelector('.lead-rhythm').value = l.rhythm;
+                                    card.querySelector('.lead-sound').value = l.sound;
+                                    card.querySelector('.lead-ducking').checked = l.ducking;
+                                    if (l.vol && card.querySelector('.lead-vol')) card.querySelector('.lead-vol').value = l.vol;
+                                    if (l.flanger !== undefined && card.querySelector('.lead-flanger')) card.querySelector('.lead-flanger').value = l.flanger;
+                                    if (l.delay !== undefined && card.querySelector('.lead-delay')) card.querySelector('.lead-delay').value = l.delay;
+                                    if (l.reverb !== undefined && card.querySelector('.lead-reverb')) card.querySelector('.lead-reverb').value = l.reverb;
+                                    if (l.adsr && window.SongComposer.Lead.setADSRData) window.SongComposer.Lead.setADSRData(card, l.adsr);
+                                });
                             }
                         });
                     }
 
-                    if (data.mods && window.SongComposer.Modulation) {
-                        document.querySelectorAll('.timeline-mod-block').forEach(m => {
-                            if (m.previousElementSibling && m.previousElementSibling.classList.contains('timeline-fill-marker')) {
-                                m.previousElementSibling.remove();
+                    // Restore exact timeline including MODs and Drag&Drop fills
+                    if (state.timelineData && state.timelineData.length > 0) {
+                        const tc = document.getElementById('timeline-tracks');
+                        tc.innerHTML = '';
+                        window.SongComposer.Main.addFillMarker(tc);
+                        
+                        state.timelineData.forEach(d => {
+                            if (d.type === 'section') {
+                                if (!document.querySelector(`.song-section[data-section="${d.letter}"]`)) {
+                                    window.SongComposer.Main.createNewSectionEditor(d.letter);
+                                }
+                                const block = document.createElement('div');
+                                block.className = 'timeline-block';
+                                block.dataset.target = d.letter;
+                                block.draggable = true;
+                                const secEl = document.querySelector(`.song-section[data-section="${d.letter}"]`);
+                                block.style.setProperty('--block-color', secEl.querySelector('.section-color-picker').value);
+                                
+                                const secName = secEl.querySelector('.section-name-input') ? secEl.querySelector('.section-name-input').value : d.letter;
+                                block.title = `${secName}`;
+                                block.innerHTML = `<span>${d.letter}</span>`;
+                                tc.appendChild(block);
+                                window.SongComposer.Main.addFillMarker(tc);
+                            } else if (d.type === 'mod') {
+                                if (window.SongComposer.Modulation) window.SongComposer.Modulation.restoreModBlock(d.steps);
+                            } else if (d.type === 'fill') {
+                                const markers = tc.querySelectorAll('.timeline-fill-marker:not(.filled)');
+                                if (markers.length > 0) {
+                                    const dropzone = markers[markers.length - 1]; 
+                                    dropzone.classList.add('filled');
+                                    dropzone.title = `Fill ${d.id}`;
+                                    dropzone.innerHTML = `<span class="fill-label">F${d.id}</span><button class="btn-remove-fill" title="Remove Fill">×</button>`;
+                                }
                             }
-                            m.remove();
                         });
-                        data.mods.forEach(mod => {
-                            window.SongComposer.Modulation.restoreModBlock(mod.steps);
-                        });
-                    }
-
-                    this.updateAutoFillsState();
-                    if (window.SongComposer.Main) {
+                        window.SongComposer.Main.updateInputFromTimeline();
+                        // Add Outro if active
+                        if (state.master.autoFills) {
+                            const outroBlock = document.createElement('div');
+                            outroBlock.className = 'timeline-block timeline-outro-block';
+                            outroBlock.draggable = false;
+                            outroBlock.style.setProperty('--block-color', 'var(--playhead-color)');
+                            outroBlock.innerHTML = `<span>END</span>`;
+                            tc.appendChild(outroBlock);
+                        }
+                    } else if (state.structure) {
+                        document.getElementById('song-structure-input').value = state.structure;
                         window.SongComposer.Main.updateTimelineFromInput();
-                        window.SongComposer.Main.recalculateTimelineWidths();
                     }
-                    alert("Project successfully imported!");
-                } catch (err) {
-                    console.error("JSON Import failed:", err);
-                    alert("Failed to parse JSON project file.");
+
+                    if(window.SongComposer.Main) window.SongComposer.Main.recalculateTimelineWidths();
+                    alert("Project Loaded Successfully!");
+                } catch(err) {
+                    alert("Error parsing JSON file: " + err.message);
                 }
             };
             reader.readAsText(file);
+            this.elements.jsonLoader.value = ''; 
         },
 
         exportMIDI() {
             const data = this.compileSongEvents();
-            if (!data.events || data.events.length === 0) {
-                alert("Nothing to export!");
-                return;
-            }
+            if(!data.events || data.events.length === 0) return alert("Nothing to export!");
 
+            const channelMap = { 
+                'chord': 0, 'bass': 1, 'lead': 2, 
+                'drum': 9, 'kick': 9, 'snare': 9, 'hihat': 9, 'tom1': 9, 'tom2': 9, 'clap': 9, 'crash': 9 
+            };
+            const PPQ = 96; 
+            const ticksPerStep = PPQ / 4; 
+            
             const tempo = this.getTempo();
+            const stepDurationSec = (60 / tempo) / 4;
 
-            const writeString = (str) => {
-                const bytes = [];
-                for (let i = 0; i < str.length; i++) bytes.push(str.charCodeAt(i));
-                return bytes;
-            };
-
-            const writeVarInt = (val) => {
-                let buffer = val & 0x7F;
-                while ((val >>>= 7) > 0) {
-                    buffer <<= 8;
-                    buffer |= 0x80;
-                    buffer |= (val & 0x7F);
-                }
-                const bytes = [];
-                while (true) {
-                    bytes.push(buffer & 0xFF);
-                    if (buffer & 0x80) buffer >>>= 8;
-                    else break;
-                }
-                return bytes;
-            };
-
-            const write32 = (val) => {
-                return [
-                    (val >>> 24) & 0xFF,
-                    (val >>> 16) & 0xFF,
-                    (val >>> 8) & 0xFF,
-                    val & 0xFF
-                ];
-            };
-
-            const write16 = (val) => {
-                return [
-                    (val >>> 8) & 0xFF,
-                    val & 0xFF
-                ];
-            };
-
-            const tempoMicroseconds = Math.round(60000000 / tempo);
+            let tracks = { 0: [], 1: [], 2: [], 9: [] };
             
-            const mThd = [
-                ...writeString('MThd'),
-                ...write32(6), 
-                ...write16(1), 
-                ...write16(2), 
-                ...write16(96) 
-            ];
-
-            const stepToTicks = 24; 
-
-            const t1Events = [
-                0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08, 
-                0x00, 0xFF, 0x51, 0x03, 
-                (tempoMicroseconds >>> 16) & 0xFF,
-                (tempoMicroseconds >>> 8) & 0xFF,
-                tempoMicroseconds & 0xFF, 
-                0x00, 0xFF, 0x2F, 0x00 
-            ];
-            const mTrk1 = [
-                ...writeString('MTrk'),
-                ...write32(t1Events.length),
-                ...t1Events
-            ];
-
-            const midiEvents = [];
-            
-            const addMidiEvent = (tick, status, data1, data2) => {
-                midiEvents.push({ tick, bytes: [status, data1, data2] });
-            };
-
-            const chMap = { 'chord': 0, 'bass': 1, 'lead': 2, 'drum': 9 };
-
-            data.events.forEach(ev => {
-                const ch = chMap[ev.instrument] !== undefined ? chMap[ev.instrument] : (ev.type === 'drum' ? 9 : 0);
-                const startTick = ev.timeStep * stepToTicks;
-                const endTick = (ev.timeStep + ev.durationSteps) * stepToTicks;
+            data.events.forEach(e => {
+                const ch = channelMap[e.instrument];
+                if (ch === undefined) return;
                 
-                let pitch = ev.midiNote;
-                if (ev.type === 'drum') {
-                    const name = ev.bufferName.toLowerCase();
-                    if (name.includes('kick')) pitch = 36;
-                    else if (name.includes('snare')) pitch = 38;
-                    else if (name.includes('hihat')) pitch = 42;
-                    else if (name.includes('tom1')) pitch = 43;
-                    else if (name.includes('tom2')) pitch = 45;
-                    else if (name.includes('clap')) pitch = 39;
-                    else if (name.includes('crash')) pitch = 49;
-                    else pitch = 36; 
-                }
-
-                if (pitch) {
-                    const vol = Math.max(1, Math.min(127, Math.floor((ev.volume || 0.8) * 127)));
-                    addMidiEvent(startTick, 0x90 | ch, pitch, vol);
-                    addMidiEvent(endTick, 0x80 | ch, pitch, 0);
-                }
+                const timeOffsetTicks = ((e.timeOffset || 0) / stepDurationSec) * ticksPerStep;
+                const absStart = Math.max(0, (e.timeStep * ticksPerStep) + timeOffsetTicks);
+                const absEnd = Math.max(0, ((e.timeStep + e.durationSteps) * ticksPerStep) + timeOffsetTicks);
+                
+                const dynamicVol = Math.max(1, Math.min(127, Math.floor(e.volume * 127)));
+                
+                tracks[ch].push({ time: absStart, type: 'noteOn', ch, note: e.midiNote, vel: dynamicVol });
+                tracks[ch].push({ time: absEnd, type: 'noteOff', ch, note: e.midiNote, vel: 0 });
             });
 
-            midiEvents.sort((a, b) => a.tick - b.tick);
+            let trackChunks = [];
+            const tempoMapTrack = [];
+            const mpqn = Math.floor(60000000 / tempo);
+            tempoMapTrack.push(
+                [0x00, 0xFF, 0x51, 0x03, (mpqn >> 16) & 0xFF, (mpqn >> 8) & 0xFF, mpqn & 0xFF] 
+            );
+            tempoMapTrack.push([0x00, 0xFF, 0x2F, 0x00]); 
+            trackChunks.push(this.compileMidiTrack(tempoMapTrack));
 
-            const t2Bytes = [];
-            let lastTick = 0;
-            midiEvents.forEach(e => {
-                const delta = e.tick - lastTick;
-                t2Bytes.push(...writeVarInt(delta));
-                t2Bytes.push(...e.bytes);
-                lastTick = e.tick;
+            [0, 1, 2, 9].forEach(ch => {
+                if (tracks[ch].length === 0) return;
+                tracks[ch].sort((a, b) => a.time - b.time);
+                let lastTime = 0;
+                let trackBytes = [];
+                tracks[ch].forEach(ev => {
+                    const currentSafeTime = Math.round(ev.time);
+                    const delta = Math.max(0, currentSafeTime - Math.round(lastTime)); 
+                    lastTime = currentSafeTime;
+                    
+                    const deltaBytes = this.toVLQ(delta);
+                    const status = (ev.type === 'noteOn' ? 0x90 : 0x80) | ev.ch;
+                    trackBytes.push(deltaBytes.concat([status, ev.note, ev.vel]));
+                });
+                trackBytes.push([0x00, 0xFF, 0x2F, 0x00]); 
+                trackChunks.push(this.compileMidiTrack(trackBytes));
             });
-            
-            t2Bytes.push(...writeVarInt(0));
-            t2Bytes.push(0xFF, 0x2F, 0x00);
 
-            const mTrk2 = [
-                ...writeString('MTrk'),
-                ...write32(t2Bytes.length),
-                ...t2Bytes
+            const numTracks = trackChunks.length;
+            const header = [
+                0x4D, 0x54, 0x68, 0x64, 
+                0x00, 0x00, 0x00, 0x06, 
+                0x00, 0x01,             
+                (numTracks >> 8) & 0xFF, numTracks & 0xFF, 
+                (PPQ >> 8) & 0xFF, PPQ & 0xFF 
             ];
 
-            const midiData = new Uint8Array([
-                ...mThd,
-                ...mTrk1,
-                ...mTrk2
-            ]);
+            let finalMidi = new Uint8Array(header.length + trackChunks.reduce((acc, t) => acc + t.length, 0));
+            finalMidi.set(header, 0);
+            let offset = header.length;
+            trackChunks.forEach(t => {
+                finalMidi.set(t, offset);
+                offset += t.length;
+            });
 
-            const blob = new Blob([midiData], { type: 'audio/midi' });
+            const blob = new Blob([finalMidi], {type: "audio/midi"});
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
+            const a = document.createElement("a");
             a.href = url;
-            a.download = 'song_midi_export.mid';
+            a.download = "song_composer_export.mid";
             a.click();
             URL.revokeObjectURL(url);
+        },
+
+        compileMidiTrack(eventArrays) {
+            let body = [];
+            eventArrays.forEach(arr => body.push(...arr));
+            const len = body.length;
+            return new Uint8Array([
+                0x4D, 0x54, 0x72, 0x6B, 
+                (len >> 24) & 0xFF, (len >> 16) & 0xFF, (len >> 8) & 0xFF, len & 0xFF, 
+                ...body
+            ]);
+        },
+
+        toVLQ(val) {
+            let buf = [val & 0x7F];
+            while ((val >>= 7)) buf.unshift((val & 0x7F) | 0x80);
+            return buf;
         }
     };
 
     window.SongComposer.Master = Master;
-
-    document.addEventListener('DOMContentLoaded', () => {
-        Master.init();
-    });
+    document.addEventListener('DOMContentLoaded', () => Master.init());
 
 })();
