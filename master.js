@@ -480,4 +480,509 @@
                 let currentFillOffset = globalStepOffset + standardLen;
                 fillsData.forEach(fd => {
                     let fillVol = parseFloat(fd.vol);
+                    if (isNaN(fillVol)) fillVol = volDrum;
+                    this.extractFillDrums(fd, events, currentFillOffset, fillVol, drumBusParams, seqItem.section);
+                    currentFillOffset += fd.replaceSteps;
+                });
+
+                globalStepOffset += totalSectionSteps;
+            });
+
+            return { events, totalSteps: globalStepOffset };
+        },
+
+        extractMelodicEvents(sectionSteps, events, globalStepOffset, instrument, bufferName, ducking, adsr, volume, fx, section, currentPitchOffset) {
+            sectionSteps.forEach(step => {
+                if (step.action === 'play' || step.action === 'bend') {
+                    events.push({
+                        type: 'melodic',
+                        instrument: instrument,
+                        bufferName: bufferName,
+                        midiNote: step.note !== null ? step.note + currentPitchOffset : null,
+                        timeStep: globalStepOffset + step.stepIndex,
+                        durationSteps: 1, 
+                        ducking: ducking,
+                        adsr: adsr,
+                        volume: volume,
+                        fx: fx,
+                        section: section,
+                        isBend: step.action === 'bend'
+                    });
+                } else if (step.action === 'hold' && events.length > 0) {
+                    let lastEvent = null;
+                    for (let i = events.length - 1; i >= 0; i--) {
+                        if (events[i].instrument === instrument && events[i].section === section) {
+                            lastEvent = events[i];
+                            break;
+                        }
+                    }
+                    if (lastEvent) {
+                        lastEvent.durationSteps++;
+                    }
+                }
+            });
+        },
+
+        extractDrumEvents(drumsData, events, globalStepOffset, volume, drumBusParams, section) {
+            const instruments = ['kick', 'snare', 'hihat', 'tom1', 'tom2', 'clap'];
+            instruments.forEach(inst => {
+                if (drumsData[inst]) {
+                    drumsData[inst].forEach(step => {
+                        if (step.play) {
+                            events.push({
+                                type: 'drum',
+                                instrument: inst,
+                                bufferName: `${inst}.wav`,
+                                timeStep: globalStepOffset + step.stepIndex,
+                                durationSteps: 1,
+                                volume: volume,
+                                section: section,
+                                compression: drumBusParams
+                            });
+                        }
+                    });
+                }
+            });
+            if (drumsData.crashFlag) {
+                events.push({
+                    type: 'drum',
+                    instrument: 'crash',
+                    bufferName: 'crash.wav',
+                    timeStep: globalStepOffset,
+                    durationSteps: 4,
+                    volume: volume,
+                    section: section,
+                    compression: drumBusParams
+                });
+            }
+        },
+
+        extractFillDrums(fd, events, globalStepOffset, fillVol, drumBusParams, section) {
+            const length = fd.replaceSteps;
+            const instruments = ['kick', 'snare', 'tom1', 'tom2', 'clap'];
+            instruments.forEach(inst => {
+                const pattern = fd[inst] || '0';
+                for (let i = 0; i < length; i++) {
+                    const char = pattern[i % pattern.length];
+                    if (char === '1') {
+                        events.push({
+                            type: 'drum',
+                            instrument: inst,
+                            bufferName: `${inst}.wav`,
+                            timeStep: globalStepOffset + i,
+                            durationSteps: 1,
+                            volume: fillVol,
+                            section: section,
+                            compression: drumBusParams
+                        });
+                    }
+                }
+            });
+            if (fd.crashOnNext) {
+                events.push({
+                    type: 'drum',
+                    instrument: 'crash',
+                    bufferName: 'crash.wav',
+                    timeStep: globalStepOffset + length,
+                    durationSteps: 4,
+                    volume: fillVol,
+                    section: section,
+                    compression: drumBusParams
+                });
+            }
+        },
+
+        exportJSON() {
+            const data = {
+                structure: document.getElementById('song-structure-input')?.value || '',
+                tempo: this.getTempo(),
+                root: this.elements.root.value,
+                scale: this.elements.scale.value,
+                vol: this.elements.vol.value,
+                humanize: this.elements.humanize.value,
+                autoFills: this.elements.autoFillsToggle.checked,
+                sections: {}
+            };
+
+            document.querySelectorAll('.song-section').forEach(sec => {
+                const letter = sec.dataset.section;
+                const leadsData = [];
+                sec.querySelectorAll('.lead-card').forEach(leadCard => {
+                    leadsData.push({
+                        rhythm: leadCard.querySelector('.lead-rhythm')?.value || '',
+                        sound: leadCard.querySelector('.lead-sound')?.value || '',
+                        vol: leadCard.querySelector('.lead-vol')?.value || '0.75',
+                        ducking: leadCard.querySelector('.lead-ducking')?.checked || false,
+                        flanger: leadCard.querySelector('.lead-flanger')?.value || '0',
+                        delay: leadCard.querySelector('.lead-delay')?.value || '0.2',
+                        reverb: leadCard.querySelector('.lead-reverb')?.value || '0.8',
+                        adsr: window.SongComposer.Lead.getADSRData(leadCard)
+                    });
+                });
+
+                data.sections[letter] = {
+                    name: sec.querySelector('.section-name-input')?.value || '',
+                    color: sec.querySelector('.section-color-picker')?.value || '#4CAF50',
+                    chordProg: sec.querySelector('.chord-prog')?.value || '',
+                    chordSound: sec.querySelector('.chord-sound')?.value || '',
+                    chordVol: sec.querySelector('.chord-vol')?.value || '0.65',
+                    chordDucking: sec.querySelector('.chord-ducking')?.checked || false,
+                    chordArpToggle: sec.querySelector('.chord-arp-toggle')?.checked || false,
+                    chordArpPattern: sec.querySelector('.chord-arp-pattern')?.value || '',
+                    chordADSR: window.SongComposer.Chords.getADSRData(sec),
+                    bassRhythm: sec.querySelector('.bass-rhythm')?.value || '',
+                    bassSound: sec.querySelector('.bass-sound')?.value || '',
+                    bassVol: sec.querySelector('.bass-vol')?.value || '0.85',
+                    bassDucking: sec.querySelector('.bass-ducking')?.checked || false,
+                    drumKick: sec.querySelector('.drum-kick')?.value || '',
+                    drumSnare: sec.querySelector('.drum-snare')?.value || '',
+                    drumHihat: sec.querySelector('.drum-hihat')?.value || '',
+                    drumKickVol: sec.querySelector('.drum-kick-vol')?.value || '0.90',
+                    drumSnareVol: sec.querySelector('.drum-snare-vol')?.value || '0.85',
+                    drumHihatVol: sec.querySelector('.drum-hihat-vol')?.value || '0.75',
+                    drumCompThresh: sec.querySelector('.drum-comp-thresh')?.value || '-35',
+                    drumCompRatio: sec.querySelector('.drum-comp-ratio')?.value || '4',
+                    drumVol: sec.querySelector('.drum-vol')?.value || '0.80',
+                    leads: leadsData
+                };
+            });
+
+            data.fills = [];
+            document.querySelectorAll('.fill-card').forEach(card => {
+                data.fills.push({
+                    id: card.dataset.fillId,
+                    replaceSteps: card.querySelector('.fill-steps')?.value || '4',
+                    kick: card.querySelector('.fill-kick')?.value || '1010',
+                    snare: card.querySelector('.fill-snare')?.value || '1111',
+                    tom1: card.querySelector('.fill-tom1')?.value || '1100',
+                    tom2: card.querySelector('.fill-tom2')?.value || '0011',
+                    clap: card.querySelector('.fill-clap')?.value || '0000',
+                    crash: card.querySelector('.fill-crash')?.checked || false,
+                    vol: card.querySelector('.fill-vol')?.value || '0.80'
+                });
+            });
+
+            data.mods = [];
+            document.querySelectorAll('.timeline-mod-block').forEach(mod => {
+                data.mods.push({
+                    steps: parseInt(mod.dataset.modSteps, 10)
+                });
+            });
+
+            const blob = new Blob([JSON.stringify(data, null, 4)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'song_project.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        },
+
+        importJSON(file) {
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    if (data.structure !== undefined) document.getElementById('song-structure-input').value = data.structure;
+                    if (data.tempo !== undefined) this.elements.tempo.value = data.tempo;
+                    if (data.root !== undefined) this.elements.root.value = data.root;
+                    if (data.scale !== undefined) {
+                        this.elements.scale.value = data.scale;
+                        if (window.SongComposer.Main) window.SongComposer.Main.updateScaleSumDisplay();
+                    }
+                    if (data.vol !== undefined) {
+                        this.elements.vol.value = data.vol;
+                        if (window.SongComposer.Audio) window.SongComposer.Audio.setMasterVolume(data.vol);
+                    }
+                    if (data.humanize !== undefined) this.elements.humanize.value = data.humanize;
+                    if (data.autoFills !== undefined) this.elements.autoFillsToggle.checked = data.autoFills;
+
+                    if (data.fills) {
+                        this.elements.fillsContainer.querySelectorAll('.fill-card').forEach(c => c.remove());
+                        data.fills.forEach(fill => {
+                            const container = this.elements.fillsContainer;
+                            const card = document.createElement('div');
+                            card.className = 'fill-card';
+                            card.draggable = true;
+                            card.dataset.fillId = fill.id;
+                            card.innerHTML = `
+                                <div class="fill-header">
+                                    <span class="drag-handle">☰</span> Fill ${fill.id}
+                                    <button class="btn-delete-fill-card" title="Remove Fill">✕</button>
+                                </div>
+                                <div class="fill-controls">
+                                    <label>Replace Steps: <input type="number" class="fill-steps" value="${fill.replaceSteps}" min="1"></label>
+                                    <label>Kick: <input type="text" class="fill-kick" value="${fill.kick}"> <button class="btn-rnd">RND</button></label>
+                                    <label>Snare: <input type="text" class="fill-snare" value="${fill.snare}"> <button class="btn-rnd">RND</button></label>
+                                    <label>Tom 1: <input type="text" class="fill-tom1" value="${fill.tom1}"> <button class="btn-rnd">RND</button></label>
+                                    <label>Tom 2: <input type="text" class="fill-tom2" value="${fill.tom2}"> <button class="btn-rnd">RND</button></label>
+                                    <label>Clap: <input type="text" class="fill-clap" value="${fill.clap}"> <button class="btn-rnd">RND</button></label>
+                                    <label class="checkbox-label"><input type="checkbox" class="fill-crash" ${fill.crash ? 'checked' : ''}> Crash on Next</label>
+                                    <label>Vol: <input type="range" class="fill-vol" min="0" max="1" step="0.01" value="${fill.vol}"></label>
+                                </div>
+                            `;
+                            container.insertBefore(card, document.getElementById('btn-add-fill'));
+                        });
+                    }
+
+                    if (data.sections) {
+                        Object.keys(data.sections).forEach(letter => {
+                            let sec = document.querySelector(`.song-section[data-section="${letter}"]`);
+                            if (!sec && window.SongComposer.Main) {
+                                sec = window.SongComposer.Main.createNewSectionEditor(letter);
+                            }
+                            if (sec) {
+                                const secData = data.sections[letter];
+                                if (secData.name) sec.querySelector('.section-name-input').value = secData.name;
+                                if (secData.color) {
+                                    sec.querySelector('.section-color-picker').value = secData.color;
+                                    sec.style.setProperty('--section-color', secData.color);
+                                }
+                                if (secData.chordProg) sec.querySelector('.chord-prog').value = secData.chordProg;
+                                if (secData.chordSound) sec.querySelector('.chord-sound').value = secData.chordSound;
+                                if (secData.chordVol) sec.querySelector('.chord-vol').value = secData.chordVol;
+                                if (secData.chordDucking !== undefined) sec.querySelector('.chord-ducking').checked = secData.chordDucking;
+                                if (secData.chordArpToggle !== undefined) sec.querySelector('.chord-arp-toggle').checked = secData.chordArpToggle;
+                                if (secData.chordArpPattern) sec.querySelector('.chord-arp-pattern').value = secData.chordArpPattern;
+                                
+                                if (secData.chordADSR) {
+                                    window.SongComposer.Chords.setADSRData(sec, secData.chordADSR);
+                                }
+
+                                if (secData.bassRhythm) sec.querySelector('.bass-rhythm').value = secData.bassRhythm;
+                                if (secData.bassSound) sec.querySelector('.bass-sound').value = secData.bassSound;
+                                { sec.querySelector('.bass-vol').value = secData.bassVol; }
+                                if (secData.bassDucking !== undefined) sec.querySelector('.bass-ducking').checked = secData.bassDucking;
+
+                                if (secData.drumKick) sec.querySelector('.drum-kick').value = secData.drumKick;
+                                if (secData.drumSnare) sec.querySelector('.drum-snare').value = secData.drumSnare;
+                                if (secData.drumHihat) sec.querySelector('.drum-hihat').value = secData.drumHihat;
+                                if (secData.drumKickVol) sec.querySelector('.drum-kick-vol').value = secData.drumKickVol;
+                                if (secData.drumSnareVol) sec.querySelector('.drum-snare-vol').value = secData.drumSnareVol;
+                                if (secData.drumHihatVol) sec.querySelector('.drum-hihat-vol').value = secData.drumHihatVol;
+                                if (secData.drumCompThresh) sec.querySelector('.drum-comp-thresh').value = secData.drumCompThresh;
+                                if (secData.drumCompRatio) sec.querySelector('.drum-comp-ratio').value = secData.drumCompRatio;
+                                if (secData.drumVol) sec.querySelector('.drum-vol').value = secData.drumVol;
+
+                                if (secData.leads) {
+                                    const leadContainer = sec.querySelector('.leads-container .collapsible-content');
+                                    leadContainer.innerHTML = '';
+                                    secData.leads.forEach(lead => {
+                                        const card = document.createElement('div');
+                                        card.className = 'lead-card';
+                                        card.innerHTML = `
+                                            <button class="btn-delete-lead" title="Remove Lead">✕</button>
+                                            <div class="controls-row">
+                                                <label>Rhythm: <input type="text" class="lead-rhythm" value="${lead.rhythm}"></label>
+                                                <button class="btn-rnd" title="Randomize Pattern">RND</button>
+                                                <button class="btn-rnd btn-transpose-down" title="Transpose Down">-1</button>
+                                                <button class="btn-rnd btn-transpose-up" title="Transpose Up">+1</button>
+                                                <label>Sound: 
+                                                    <select class="lead-sound">
+                                                        <option value="lead1.wav" ${lead.sound === 'lead1.wav' ? 'selected' : ''}>Lead 1</option>
+                                                        <option value="lead2.wav" ${lead.sound === 'lead2.wav' ? 'selected' : ''}>Lead 2</option>
+                                                        <option value="lead3.wav" ${lead.sound === 'lead3.wav' ? 'selected' : ''}>Lead 3</option>
+                                                        <option value="lead4.wav" ${lead.sound === 'lead4.wav' ? 'selected' : ''}>Lead 4</option>
+                                                    </select>
+                                                </label>
+                                                <label>Vol: <input type="range" class="lead-vol" min="0" max="1" step="0.01" value="${lead.vol}"></label>
+                                                <label class="checkbox-label"><input type="checkbox" class="lead-ducking" ${lead.ducking ? 'checked' : ''}> Ducking</label>
+                                            </div>
+                                            <div class="controls-row fx-row">
+                                                <label>Flanger: <input type="range" class="lead-flanger" min="0" max="1" step="0.01" value="${lead.flanger}"></label>
+                                                <label>Delay: <input type="range" class="lead-delay" min="0" max="1" step="0.01" value="${lead.delay}"></label>
+                                                <label>Reverb: <input type="range" class="lead-reverb" min="0" max="1" step="0.01" value="${lead.reverb}"></label>
+                                            </div>
+                                            <div class="adsr-container">
+                                                <label>ADSR</label>
+                                                <canvas class="adsr-canvas" width="200" height="60"></canvas>
+                                            </div>
+                                        `;
+                                        leadContainer.appendChild(card);
+                                        if (window.SongComposer.Lead) {
+                                            window.SongComposer.Lead.initADSRCanvas(card.querySelector('.adsr-canvas'));
+                                            window.SongComposer.Lead.setADSRData(card, lead.adsr);
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
+
+                    if (data.mods && window.SongComposer.Modulation) {
+                        document.querySelectorAll('.timeline-mod-block').forEach(m => {
+                            if (m.previousElementSibling && m.previousElementSibling.classList.contains('timeline-fill-marker')) {
+                                m.previousElementSibling.remove();
+                            }
+                            m.remove();
+                        });
+                        data.mods.forEach(mod => {
+                            window.SongComposer.Modulation.restoreModBlock(mod.steps);
+                        });
+                    }
+
+                    this.updateAutoFillsState();
+                    if (window.SongComposer.Main) {
+                        window.SongComposer.Main.updateTimelineFromInput();
+                        window.SongComposer.Main.recalculateTimelineWidths();
+                    }
+                    alert("Project successfully imported!");
+                } catch (err) {
+                    console.error("JSON Import failed:", err);
+                    alert("Failed to parse JSON project file.");
+                }
+            };
+            reader.readAsText(file);
+        },
+
+        exportMIDI() {
+            const data = this.compileSongEvents();
+            if (!data.events || data.events.length === 0) {
+                alert("Nothing to export!");
+                return;
+            }
+
+            const tempo = this.getTempo();
+
+            const writeString = (str) => {
+                const bytes = [];
+                for (let i = 0; i < str.length; i++) bytes.push(str.charCodeAt(i));
+                return bytes;
+            };
+
+            const writeVarInt = (val) => {
+                let buffer = val & 0x7F;
+                while ((val >>>= 7) > 0) {
+                    buffer <<= 8;
+                    buffer |= 0x80;
+                    buffer |= (val & 0x7F);
+                }
+                const bytes = [];
+                while (true) {
+                    bytes.push(buffer & 0xFF);
+                    if (buffer & 0x80) buffer >>>= 8;
+                    else break;
+                }
+                return bytes;
+            };
+
+            const write32 = (val) => {
+                return [
+                    (val >>> 24) & 0xFF,
+                    (val >>> 16) & 0xFF,
+                    (val >>> 8) & 0xFF,
+                    val & 0xFF
+                ];
+            };
+
+            const write16 = (val) => {
+                return [
+                    (val >>> 8) & 0xFF,
+                    val & 0xFF
+                ];
+            };
+
+            const tempoMicroseconds = Math.round(60000000 / tempo);
             
+            const mThd = [
+                ...writeString('MThd'),
+                ...write32(6), 
+                ...write16(1), 
+                ...write16(2), 
+                ...write16(96) 
+            ];
+
+            const stepToTicks = 24; 
+
+            const t1Events = [
+                0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08, 
+                0x00, 0xFF, 0x51, 0x03, 
+                (tempoMicroseconds >>> 16) & 0xFF,
+                (tempoMicroseconds >>> 8) & 0xFF,
+                tempoMicroseconds & 0xFF, 
+                0x00, 0xFF, 0x2F, 0x00 
+            ];
+            const mTrk1 = [
+                ...writeString('MTrk'),
+                ...write32(t1Events.length),
+                ...t1Events
+            ];
+
+            const midiEvents = [];
+            
+            const addMidiEvent = (tick, status, data1, data2) => {
+                midiEvents.push({ tick, bytes: [status, data1, data2] });
+            };
+
+            const chMap = { 'chord': 0, 'bass': 1, 'lead': 2, 'drum': 9 };
+
+            data.events.forEach(ev => {
+                const ch = chMap[ev.instrument] !== undefined ? chMap[ev.instrument] : (ev.type === 'drum' ? 9 : 0);
+                const startTick = ev.timeStep * stepToTicks;
+                const endTick = (ev.timeStep + ev.durationSteps) * stepToTicks;
+                
+                let pitch = ev.midiNote;
+                if (ev.type === 'drum') {
+                    const name = ev.bufferName.toLowerCase();
+                    if (name.includes('kick')) pitch = 36;
+                    else if (name.includes('snare')) pitch = 38;
+                    else if (name.includes('hihat')) pitch = 42;
+                    else if (name.includes('tom1')) pitch = 43;
+                    else if (name.includes('tom2')) pitch = 45;
+                    else if (name.includes('clap')) pitch = 39;
+                    else if (name.includes('crash')) pitch = 49;
+                    else pitch = 36; 
+                }
+
+                if (pitch) {
+                    const vol = Math.max(1, Math.min(127, Math.floor((ev.volume || 0.8) * 127)));
+                    addMidiEvent(startTick, 0x90 | ch, pitch, vol);
+                    addMidiEvent(endTick, 0x80 | ch, pitch, 0);
+                }
+            });
+
+            midiEvents.sort((a, b) => a.tick - b.tick);
+
+            const t2Bytes = [];
+            let lastTick = 0;
+            midiEvents.forEach(e => {
+                const delta = e.tick - lastTick;
+                t2Bytes.push(...writeVarInt(delta));
+                t2Bytes.push(...e.bytes);
+                lastTick = e.tick;
+            });
+            
+            t2Bytes.push(...writeVarInt(0));
+            t2Bytes.push(0xFF, 0x2F, 0x00);
+
+            const mTrk2 = [
+                ...writeString('MTrk'),
+                ...write32(t2Bytes.length),
+                ...t2Bytes
+            ];
+
+            const midiData = new Uint8Array([
+                ...mThd,
+                ...mTrk1,
+                ...mTrk2
+            ]);
+
+            const blob = new Blob([midiData], { type: 'audio/midi' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'song_midi_export.mid';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    };
+
+    window.SongComposer.Master = Master;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        Master.init();
+    });
+
+})();
