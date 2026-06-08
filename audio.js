@@ -5,12 +5,30 @@
         ctx: null,
         buffers: {}, 
         
+        // Output routing nodes
         masterGain: null,
         masterLimiter: null,
+        limiterDrive: null,
         drumBusComp: null,
         drumBusGain: null,
         duckingBus: null,
         reverbBuffer: null,
+
+        // Master FX Chain Nodes
+        summingBus: null,
+        hpfNode: null,
+        lpfNode: null,
+        saturator: null,
+
+        // 3-Band Multiband Compressor Nodes
+        lowSplit: null,
+        midSplitHP: null,
+        midSplitLP: null,
+        highSplit: null,
+        lowComp: null,
+        midComp: null,
+        highComp: null,
+        mbSum: null,
 
         // Scheduler state
         schedulerInterval: null,
@@ -32,26 +50,165 @@
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             this.ctx = new AudioContext();
 
+            // 1. Core Inputs
+            this.duckingBus = this.ctx.createGain();
+            this.drumBusGain = this.ctx.createGain();
+            this.drumBusComp = this.ctx.createDynamicsCompressor();
+
+            // Connect drums base bus
+            this.drumBusGain.connect(this.drumBusComp);
+
+            // 2. Main Summing Bus
+            this.summingBus = this.ctx.createGain();
+            this.duckingBus.connect(this.summingBus);
+            this.drumBusComp.connect(this.summingBus);
+
+            // 3. High Pass & Low Pass Master Filters
+            this.hpfNode = this.ctx.createBiquadFilter();
+            this.hpfNode.type = 'highpass';
+            this.hpfNode.frequency.value = 20;
+
+            this.lpfNode = this.ctx.createBiquadFilter();
+            this.lpfNode.type = 'lowpass';
+            this.lpfNode.frequency.value = 20000;
+
+            this.summingBus.connect(this.hpfNode);
+            this.hpfNode.connect(this.lpfNode);
+
+            // 4. Master Saturation (Waveshaper)
+            this.saturator = this.ctx.createWaveShaper();
+            this.saturator.curve = this.makeDistortionCurve(15);
+            this.saturator.oversample = '4x';
+            this.lpfNode.connect(this.saturator);
+
+            // 5. 3-Band Multiband Compressor Crossover Network
+            this.lowSplit = this.ctx.createBiquadFilter();
+            this.lowSplit.type = 'lowpass';
+            this.lowSplit.frequency.value = 200;
+
+            this.midSplitHP = this.ctx.createBiquadFilter();
+            this.midSplitHP.type = 'highpass';
+            this.midSplitHP.frequency.value = 200;
+            this.midSplitLP = this.ctx.createBiquadFilter();
+            this.midSplitLP.type = 'lowpass';
+            this.midSplitLP.frequency.value = 3000;
+
+            this.highSplit = this.ctx.createBiquadFilter();
+            this.highSplit.type = 'highpass';
+            this.highSplit.frequency.value = 3000;
+
+            this.lowComp = this.ctx.createDynamicsCompressor();
+            this.midComp = this.ctx.createDynamicsCompressor();
+            this.highComp = this.ctx.createDynamicsCompressor();
+
+            // Set specific multiband behaviors for a punchy synthwave gluing
+            const now = this.ctx.currentTime;
+            this.lowComp.threshold.setValueAtTime(-16, now);
+            this.lowComp.ratio.setValueAtTime(2.5, now);
+            this.lowComp.attack.setValueAtTime(0.015, now); // Slightly slower for low transients
+            this.lowComp.release.setValueAtTime(0.15, now);
+
+            this.midComp.threshold.setValueAtTime(-16, now);
+            this.midComp.ratio.setValueAtTime(2.5, now);
+            this.midComp.attack.setValueAtTime(0.01, now);
+            this.midComp.release.setValueAtTime(0.1, now);
+
+            this.highComp.threshold.setValueAtTime(-16, now);
+            this.highComp.ratio.setValueAtTime(2.5, now);
+            this.highComp.attack.setValueAtTime(0.005, now); // Fast to control air
+            this.highComp.release.setValueAtTime(0.08, now);
+
+            this.mbSum = this.ctx.createGain();
+
+            // Route crossover paths
+            this.saturator.connect(this.lowSplit);
+            this.saturator.connect(this.midSplitHP);
+            this.midSplitHP.connect(this.midSplitLP);
+            this.saturator.connect(this.highSplit);
+
+            this.lowSplit.connect(this.lowComp);
+            this.midSplitLP.connect(this.midComp);
+            this.highSplit.connect(this.highComp);
+
+            this.lowComp.connect(this.mbSum);
+            this.midComp.connect(this.mbSum);
+            this.highComp.connect(this.mbSum);
+
+            // 6. Master Limiter Drive & Master Limiter
+            this.limiterDrive = this.ctx.createGain();
+            this.limiterDrive.gain.value = this.dbToGain(3.0); // Drive input into ceiling
+
             this.masterLimiter = this.ctx.createDynamicsCompressor();
             this.masterLimiter.attack.value = 0.005;
             this.masterLimiter.release.value = 0.050;
-            this.masterLimiter.ratio.value = 20.0; 
-            
-            this.masterGain = this.ctx.createGain();
-            this.drumBusComp = this.ctx.createDynamicsCompressor();
-            this.drumBusGain = this.ctx.createGain();
-            this.duckingBus = this.ctx.createGain();
+            this.masterLimiter.threshold.value = -0.5; // Ceiling
+            this.masterLimiter.ratio.value = 20.0; // High ratio for brickwall limiting
 
-            this.duckingBus.connect(this.masterLimiter);
-            this.drumBusGain.connect(this.drumBusComp);
-            this.drumBusComp.connect(this.masterLimiter);
+            this.mbSum.connect(this.limiterDrive);
+            this.limiterDrive.connect(this.masterLimiter);
+            
+            // 7. Master Output Fader
+            this.masterGain = this.ctx.createGain();
             this.masterLimiter.connect(this.masterGain);
             this.masterGain.connect(this.ctx.destination);
 
             this.generateReverbImpulse();
 
+            // Sync with initial DOM Slider inputs automatically
             const volInput = document.getElementById('master-vol');
             if (volInput) this.setMasterVolume(volInput.value);
+
+            this.readDOMFXDefaults();
+        },
+
+        dbToGain(db) {
+            return Math.pow(10, db / 20);
+        },
+
+        makeDistortionCurve(amount) {
+            const n_samples = 44100;
+            const curve = new Float32Array(n_samples);
+            if (amount <= 0) {
+                for (let i = 0; i < n_samples; ++i) {
+                    curve[i] = (i * 2) / n_samples - 1;
+                }
+                return curve;
+            }
+            const k = amount;
+            for (let i = 0; i < n_samples; ++i) {
+                const x = (i * 2) / n_samples - 1;
+                curve[i] = ((3 + k) * x) / (3 + k * Math.abs(x));
+            }
+            return curve;
+        },
+
+        readDOMFXDefaults() {
+            const limGain = document.getElementById('master-lim-gain');
+            if (limGain) this.setMasterLimiterGain(parseFloat(limGain.value));
+
+            const limCeiling = document.getElementById('master-lim-ceiling');
+            if (limCeiling) this.setMasterLimiterCeiling(parseFloat(limCeiling.value));
+
+            const limAttack = document.getElementById('master-lim-attack');
+            if (limAttack) this.setMasterLimiterAttack(parseFloat(limAttack.value));
+
+            const limRelease = document.getElementById('master-lim-release');
+            if (limRelease) this.setMasterLimiterRelease(parseFloat(limRelease.value));
+
+            const hpfFreq = document.getElementById('master-hpf-freq');
+            if (hpfFreq) this.setMasterHPF(parseFloat(hpfFreq.value));
+
+            const lpfFreq = document.getElementById('master-lpf-freq');
+            if (lpfFreq) this.setMasterLPF(parseFloat(lpfFreq.value));
+
+            const satDrive = document.getElementById('master-sat-drive');
+            if (satDrive) this.setMasterSaturation(parseFloat(satDrive.value));
+
+            const mbThresh = document.getElementById('master-mb-thresh');
+            if (mbThresh) this.setMasterMBThreshold(parseFloat(mbThresh.value));
+
+            const mbRatio = document.getElementById('master-mb-ratio');
+            if (mbRatio) this.setMasterMBRatio(parseFloat(mbRatio.value));
         },
 
         generateReverbImpulse() {
@@ -82,6 +239,69 @@
             const fileInput = document.getElementById('local-wav-loader');
             if (fileInput) {
                 fileInput.addEventListener('change', (e) => this.loadLocalFiles(e.target.files));
+            }
+
+            this.bindMasterFXControls();
+        },
+
+        bindMasterFXControls() {
+            const bindSlider = (id, callback) => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('input', (e) => {
+                        this.initAudioContext();
+                        callback(parseFloat(e.target.value));
+                    });
+                }
+            };
+
+            bindSlider('master-lim-gain', (val) => this.setMasterLimiterGain(val));
+            bindSlider('master-lim-ceiling', (val) => this.setMasterLimiterCeiling(val));
+            bindSlider('master-lim-attack', (val) => this.setMasterLimiterAttack(val));
+            bindSlider('master-lim-release', (val) => this.setMasterLimiterRelease(val));
+            bindSlider('master-hpf-freq', (val) => this.setMasterHPF(val));
+            bindSlider('master-lpf-freq', (val) => this.setMasterLPF(val));
+            bindSlider('master-sat-drive', (val) => this.setMasterSaturation(val));
+            bindSlider('master-mb-thresh', (val) => this.setMasterMBThreshold(val));
+            bindSlider('master-mb-ratio', (val) => this.setMasterMBRatio(val));
+        },
+
+        // Dynamic Setter Methods
+        setMasterLimiterGain(db) {
+            if (this.limiterDrive) this.limiterDrive.gain.setTargetAtTime(this.dbToGain(db), this.ctx.currentTime, 0.02);
+        },
+        setMasterLimiterCeiling(db) {
+            if (this.masterLimiter) this.masterLimiter.threshold.setTargetAtTime(db, this.ctx.currentTime, 0.02);
+        },
+        setMasterLimiterAttack(val) {
+            if (this.masterLimiter) this.masterLimiter.attack.setTargetAtTime(val, this.ctx.currentTime, 0.02);
+        },
+        setMasterLimiterRelease(val) {
+            if (this.masterLimiter) this.masterLimiter.release.setTargetAtTime(val, this.ctx.currentTime, 0.02);
+        },
+        setMasterHPF(val) {
+            if (this.hpfNode) this.hpfNode.frequency.setTargetAtTime(val, this.ctx.currentTime, 0.02);
+        },
+        setMasterLPF(val) {
+            if (this.lpfNode) this.lpfNode.frequency.setTargetAtTime(val, this.ctx.currentTime, 0.02);
+        },
+        setMasterSaturation(val) {
+            if (this.saturator) this.saturator.curve = this.makeDistortionCurve(val);
+        },
+        setMasterMBThreshold(db) {
+            if (this.lowComp && this.midComp && this.highComp) {
+                const now = this.ctx.currentTime;
+                this.lowComp.threshold.setTargetAtTime(db, now, 0.02);
+                this.midComp.threshold.setTargetAtTime(db, now, 0.02);
+                this.highComp.threshold.setTargetAtTime(db, now, 0.02);
+            }
+        },
+        setMasterMBRatio(val) {
+            if (this.lowComp && this.midComp && this.highComp) {
+                const now = this.ctx.currentTime;
+                this.lowComp.ratio.setTargetAtTime(val, now, 0.02);
+                this.midComp.ratio.setTargetAtTime(val, now, 0.02);
+                this.highComp.ratio.setTargetAtTime(val, now, 0.02);
             }
         },
 
@@ -303,8 +523,26 @@
 
             stepEvents.forEach(ev => {
                 const durSec = ev.durationSteps * this.stepDuration;
-                const vol = ev.volume !== undefined ? ev.volume : 0.8;
+                let vol = ev.volume !== undefined ? ev.volume : 0.8;
                 
+                // Scale specific drum piece volumes dynamically if in section editor
+                const name = ev.bufferName.toLowerCase();
+                if (ev.type === 'drum' && ev.section) {
+                    const secEl = document.querySelector(`.song-section[data-section="${ev.section}"]`);
+                    if (secEl) {
+                        if (name.includes('kick')) {
+                            const slider = secEl.querySelector('.drum-kick-vol');
+                            if (slider) vol *= parseFloat(slider.value);
+                        } else if (name.includes('snare')) {
+                            const slider = secEl.querySelector('.drum-snare-vol');
+                            if (slider) vol *= parseFloat(slider.value);
+                        } else if (name.includes('hihat')) {
+                            const slider = secEl.querySelector('.drum-hihat-vol');
+                            if (slider) vol *= parseFloat(slider.value);
+                        }
+                    }
+                }
+
                 let evTime = time + (ev.timeOffset || 0);
                 if (evTime < this.ctx.currentTime) evTime = this.ctx.currentTime;
                 
@@ -315,7 +553,6 @@
                     const source = this.ctx.createBufferSource();
                     source.buffer = buffer;
                     
-                    const name = ev.bufferName.toLowerCase();
                     if (name.includes('bass') || name.includes('lead') || name.includes('chord')) {
                         if (buffer.duration >= 1.4) {
                             source.loop = true;
@@ -355,7 +592,7 @@
                     source.connect(volGain);
                     volGain.connect(envGain);
 
-                    let finalDest = this.masterLimiter;
+                    let finalDest = this.summingBus; // Routed to FX Summing Bus
                     if (ev.type === 'drum') {
                         finalDest = this.drumBusGain;
                         if (name.includes('kick')) {
@@ -381,6 +618,7 @@
                     this.activeVolNodes.push({ gainNode: volGain, stopTime: stopTime, section: ev.section, group: volGroup });
                 }
 
+                // Volume changes directly translate to MIDI Velocity values dynamically
                 if (midiOut && ev.midiNote) {
                     const ch = midiChannelMap[ev.instrument];
                     if (ch !== undefined) {
@@ -439,16 +677,93 @@
             const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
             const offlineCtx = new OfflineCtx(2, lengthSamples, sampleRate);
 
+            // Fetch live settings for exact offline duplication
+            const activeLimGain = parseFloat(document.getElementById('master-lim-gain')?.value || 3.0);
+            const activeLimCeiling = parseFloat(document.getElementById('master-lim-ceiling')?.value || -0.5);
+            const activeLimAttack = parseFloat(document.getElementById('master-lim-attack')?.value || 0.005);
+            const activeLimRelease = parseFloat(document.getElementById('master-lim-release')?.value || 0.05);
+            const activeHpfFreq = parseFloat(document.getElementById('master-hpf-freq')?.value || 20);
+            const activeLpfFreq = parseFloat(document.getElementById('master-lpf-freq')?.value || 20000);
+            const activeSatDrive = parseFloat(document.getElementById('master-sat-drive')?.value || 15);
+            const activeMbThresh = parseFloat(document.getElementById('master-mb-thresh')?.value || -16);
+            const activeMbRatio = parseFloat(document.getElementById('master-mb-ratio')?.value || 2.5);
+
+            // Build duplicate Offline FX Matrix
             const mLimiter = offlineCtx.createDynamicsCompressor();
-            mLimiter.attack.value = 0.005; mLimiter.release.value = 0.050; mLimiter.ratio.value = 20.0;
-            
+            mLimiter.attack.value = activeLimAttack; 
+            mLimiter.release.value = activeLimRelease; 
+            mLimiter.threshold.value = activeLimCeiling;
+            mLimiter.ratio.value = 20.0;
+
+            const limDr = offlineCtx.createGain();
+            limDr.gain.value = this.dbToGain(activeLimGain);
+
             const dComp = offlineCtx.createDynamicsCompressor();
             const dGain = offlineCtx.createGain();
             const duckBus = offlineCtx.createGain();
-            
-            duckBus.connect(mLimiter);
+            const sumBus = offlineCtx.createGain();
+
+            duckBus.connect(sumBus);
             dGain.connect(dComp);
-            dComp.connect(mLimiter);
+            dComp.connect(sumBus);
+
+            const offHpf = offlineCtx.createBiquadFilter();
+            offHpf.type = 'highpass';
+            offHpf.frequency.value = activeHpfFreq;
+
+            const offLpf = offlineCtx.createBiquadFilter();
+            offLpf.type = 'lowpass';
+            offLpf.frequency.value = activeLpfFreq;
+
+            sumBus.connect(offHpf);
+            offHpf.connect(offLpf);
+
+            const offSat = offlineCtx.createWaveShaper();
+            offSat.curve = this.makeDistortionCurve(activeSatDrive);
+            offSat.oversample = '4x';
+            offLpf.connect(offSat);
+
+            // Multiband paths duplication
+            const offLowSplit = offlineCtx.createBiquadFilter();
+            offLowSplit.type = 'lowpass'; offLowSplit.frequency.value = 200;
+
+            const offMidSplitHP = offlineCtx.createBiquadFilter();
+            offMidSplitHP.type = 'highpass'; offMidSplitHP.frequency.value = 200;
+            const offMidSplitLP = offlineCtx.createBiquadFilter();
+            offMidSplitLP.type = 'lowpass'; offMidSplitLP.frequency.value = 3000;
+
+            const offHighSplit = offlineCtx.createBiquadFilter();
+            offHighSplit.type = 'highpass'; offHighSplit.frequency.value = 3000;
+
+            const offLowComp = offlineCtx.createDynamicsCompressor();
+            const offMidComp = offlineCtx.createDynamicsCompressor();
+            const offHighComp = offlineCtx.createDynamicsCompressor();
+
+            [offLowComp, offMidComp, offHighComp].forEach(comp => {
+                comp.threshold.value = activeMbThresh;
+                comp.ratio.value = activeMbRatio;
+            });
+            offLowComp.attack.value = 0.015; offLowComp.release.value = 0.15;
+            offMidComp.attack.value = 0.01; offMidComp.release.value = 0.1;
+            offHighComp.attack.value = 0.005; offHighComp.release.value = 0.08;
+
+            const offMbSum = offlineCtx.createGain();
+
+            offSat.connect(offLowSplit);
+            offSat.connect(offMidSplitHP);
+            offMidSplitHP.connect(offMidSplitLP);
+            offSat.connect(offHighSplit);
+
+            offLowSplit.connect(offLowComp);
+            offMidSplitLP.connect(offMidComp);
+            offHighSplit.connect(offHighComp);
+
+            offLowComp.connect(offMbSum);
+            offMidComp.connect(offMbSum);
+            offHighComp.connect(offMbSum);
+
+            offMbSum.connect(limDr);
+            limDr.connect(mLimiter);
             mLimiter.connect(offlineCtx.destination);
 
             data.events.forEach(ev => {
@@ -459,13 +774,31 @@
                 timeSec = Math.max(0, timeSec); 
                 
                 const durSec = ev.durationSteps * stepDuration;
-                const vol = ev.volume !== undefined ? ev.volume : 0.8;
+                let vol = ev.volume !== undefined ? ev.volume : 0.8;
+                
+                // Scale specific offline drum levels dynamically
+                const name = ev.bufferName.toLowerCase();
+                if (ev.type === 'drum' && ev.section) {
+                    const secEl = document.querySelector(`.song-section[data-section="${ev.section}"]`);
+                    if (secEl) {
+                        if (name.includes('kick')) {
+                            const slider = secEl.querySelector('.drum-kick-vol');
+                            if (slider) vol *= parseFloat(slider.value);
+                        } else if (name.includes('snare')) {
+                            const slider = secEl.querySelector('.drum-snare-vol');
+                            if (slider) vol *= parseFloat(slider.value);
+                        } else if (name.includes('hihat')) {
+                            const slider = secEl.querySelector('.drum-hihat-vol');
+                            if (slider) vol *= parseFloat(slider.value);
+                        }
+                    }
+                }
+
                 let stopTime = timeSec + durSec;
 
                 const source = offlineCtx.createBufferSource();
                 source.buffer = buffer;
                 
-                const name = ev.bufferName.toLowerCase();
                 if (name.includes('bass') || name.includes('lead') || name.includes('chord')) {
                     if (buffer.duration >= 1.4) {
                         source.loop = true;
@@ -503,7 +836,7 @@
                 source.connect(volGain);
                 volGain.connect(envGain);
 
-                let finalDest = mLimiter;
+                let finalDest = sumBus;
                 if (ev.type === 'drum') {
                     finalDest = dGain;
                     if (name.includes('kick')) {
