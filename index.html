@@ -45,7 +45,7 @@
         <section class="panel master-panel">
             <h2 class="collapsible-header"><span class="chevron">▼</span> Master Controls</h2>
             <div class="collapsible-content">
-                <div class="controls-grid">
+                <div class="controls-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
                     <div class="control-group">
                         <label>Root Note</label>
                         <select id="master-root">
@@ -72,7 +72,7 @@
                     <div class="control-group">
                         <label>Tempo (BPM)</label>
                         <div style="display: flex; justify-content: flex-end;">
-                            <input type="number" id="master-tempo" value="100" min="40" max="300" style="width: 80px;">
+                            <input type="number" id="master-tempo" value="110" min="40" max="300" style="width: 80px;">
                         </div>
                     </div>
                     
@@ -81,6 +81,30 @@
                         <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8">
                         <label style="margin-top: 10px;">Humanize</label>
                         <input type="range" id="master-humanize" min="0" max="1" step="0.01" value="0">
+                    </div>
+
+                    <!-- Master Limiter -->
+                    <div class="control-group" style="background: rgba(0,0,0,0.15); padding: 10px; border-radius: 8px;">
+                        <label style="color: var(--accent-primary);">Master Limiter</label>
+                        <label style="font-size: 0.75rem; margin-top: 5px;">Gain (dB): <input type="range" id="master-lim-gain" min="0" max="12" step="0.1" value="3.0"></label>
+                        <label style="font-size: 0.75rem;">Ceiling (dB): <input type="range" id="master-lim-ceiling" min="-12" max="0" step="0.1" value="-0.5"></label>
+                        <label style="font-size: 0.75rem;">Attack (s): <input type="range" id="master-lim-attack" min="0.001" max="0.1" step="0.001" value="0.005"></label>
+                        <label style="font-size: 0.75rem;">Release (s): <input type="range" id="master-lim-release" min="0.01" max="1.0" step="0.01" value="0.05"></label>
+                    </div>
+
+                    <!-- Filters & Saturation -->
+                    <div class="control-group" style="background: rgba(0,0,0,0.15); padding: 10px; border-radius: 8px;">
+                        <label style="color: var(--accent-secondary);">Master EQ & Saturation</label>
+                        <label style="font-size: 0.75rem; margin-top: 5px;">HPF Freq (Hz): <input type="range" id="master-hpf-freq" min="10" max="1000" step="1" value="20"></label>
+                        <label style="font-size: 0.75rem;">LPF Freq (Hz): <input type="range" id="master-lpf-freq" min="200" max="20000" step="10" value="20000"></label>
+                        <label style="font-size: 0.75rem;">Saturation (%): <input type="range" id="master-sat-drive" min="0" max="100" step="1" value="15"></label>
+                    </div>
+
+                    <!-- Multiband Compression -->
+                    <div class="control-group" style="background: rgba(0,0,0,0.15); padding: 10px; border-radius: 8px;">
+                        <label style="color: var(--accent-rnd);">Multiband Compressor</label>
+                        <label style="font-size: 0.75rem; margin-top: 5px;">Threshold (dB): <input type="range" id="master-mb-thresh" min="-40" max="0" step="0.5" value="-16.0"></label>
+                        <label style="font-size: 0.75rem;">Ratio: <input type="range" id="master-mb-ratio" min="1" max="12" step="0.1" value="2.5"></label>
                     </div>
                     
                     <div class="control-group" style="justify-content: center;">
@@ -153,7 +177,7 @@
                         <label>Tom 2: <input type="text" class="fill-tom2" value="0011"> <button class="btn-rnd">RND</button></label>
                         <label>Clap: <input type="text" class="fill-clap" value="0000"> <button class="btn-rnd">RND</button></label>
                         <label class="checkbox-label"><input type="checkbox" class="fill-crash"> Crash on Next</label>
-                        <label>Vol: <input type="range" class="fill-vol" min="0" max="1" step="0.01" value="0.8"></label>
+                        <label>Vol: <input type="range" class="fill-vol" min="0" max="1" step="0.01" value="0.80"></label>
                     </div>
                 </div>
                 <button id="btn-add-fill" class="btn-accent" style="margin-top: 15px;">+ Create New Fill</button>
@@ -191,7 +215,7 @@
                                         <option value="chord4.wav">Chord 4</option>
                                     </select>
                                 </label>
-                                <label>Vol: <input type="range" class="chord-vol" min="0" max="1" step="0.01" value="0.8"></label>
+                                <label>Vol: <input type="range" class="chord-vol" min="0" max="1" step="0.01" value="0.65"></label>
                                 <label class="checkbox-label"><input type="checkbox" class="chord-ducking"> Ducking</label>
                                 <label class="checkbox-label"><input type="checkbox" class="chord-arp-toggle"> Arp</label>
                                 <label>Arp Pattern: <input type="text" class="chord-arp-pattern" value="1231234-1231234-"></label>
@@ -216,8 +240,8 @@
                                     <option value="bass2.wav">Bass 2</option>
                                 </select>
                             </label>
-                            <label>Vol: <input type="range" class="bass-vol" min="0" max="1" step="0.01" value="0.8"></label>
-                            <label class="checkbox-label"><input type="checkbox" class="bass-ducking"> Ducking</label>
+                            <label>Vol: <input type="range" class="bass-vol" min="0" max="1" step="0.01" value="0.85"></label>
+                            <label class="checkbox-label"><input type="checkbox" class="bass-ducking" checked> Ducking</label>
                         </div>
                     </div>
 
@@ -246,7 +270,7 @@
                                             <option value="lead4.wav">Lead 4</option>
                                         </select>
                                     </label>
-                                    <label>Vol: <input type="range" class="lead-vol" min="0" max="1" step="0.01" value="0.6"></label>
+                                    <label>Vol: <input type="range" class="lead-vol" min="0" max="1" step="0.01" value="0.75"></label>
                                     <label class="checkbox-label"><input type="checkbox" class="lead-ducking"> Ducking</label>
                                 </div>
                                 <div class="controls-row fx-row">
@@ -275,9 +299,14 @@
                                 <button class="btn-rnd">RND</button>
                             </div>
                             <div class="controls-row fx-row">
+                                <label>Kick Vol: <input type="range" class="drum-kick-vol" min="0" max="1" step="0.01" value="0.90"></label>
+                                <label>Snare Vol: <input type="range" class="drum-snare-vol" min="0" max="1" step="0.01" value="0.85"></label>
+                                <label>Hihat Vol: <input type="range" class="drum-hihat-vol" min="0" max="1" step="0.01" value="0.75"></label>
+                            </div>
+                            <div class="controls-row fx-row">
                                 <label>Comp Thresh: <input type="range" class="drum-comp-thresh" min="-40" max="0" value="-35"></label>
                                 <label>Comp Ratio: <input type="range" class="drum-comp-ratio" min="1" max="20" value="4"></label>
-                                <label>Vol: <input type="range" class="drum-vol" min="0" max="1" step="0.01" value="0.6"></label>
+                                <label>Vol: <input type="range" class="drum-vol" min="0" max="1" step="0.01" value="0.80"></label>
                             </div>
                         </div>
                     </div>
