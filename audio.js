@@ -18,7 +18,13 @@
         summingBus: null,
         hpfNode: null,
         lpfNode: null,
+        
+        // Parallel Saturation Nodes
+        satHpfNode: null,
         saturator: null,
+        satDryGain: null,
+        satWetGain: null,
+        preCrossoverBus: null,
 
         // 3-Band Multiband Compressor Nodes
         lowSplit: null,
@@ -75,13 +81,34 @@
             this.summingBus.connect(this.hpfNode);
             this.hpfNode.connect(this.lpfNode);
 
-            // 4. Master Saturation (Waveshaper)
-            this.saturator = this.ctx.createWaveShaper();
-            this.saturator.curve = this.makeDistortionCurve(15);
-            this.saturator.oversample = '4x';
-            this.lpfNode.connect(this.saturator);
+            // 4. Parallel Saturation Setup (Matalien taajuuksien eristäminen)
+            this.satHpfNode = this.ctx.createBiquadFilter();
+            this.satHpfNode.type = 'highpass';
+            this.satHpfNode.frequency.value = 150; // Oletusleikkaus ennen saturaatiota
 
-            // 5. 3-Band Multiband Compressor Crossover Network
+            this.saturator = this.ctx.createWaveShaper();
+            this.saturator.curve = this.makeDistortionCurve(3); // Oletus 3%
+            this.saturator.oversample = '4x';
+
+            this.satDryGain = this.ctx.createGain();
+            this.satDryGain.gain.value = 1.0; // Puhdas linja aina täysillä
+
+            this.satWetGain = this.ctx.createGain();
+            this.satWetGain.gain.value = 0.50; // Sekoitusvoimakkuuden oletus
+
+            this.preCrossoverBus = this.ctx.createGain();
+
+            // Kytketään rinnakkaisketjut master EQ:n ulostulosta
+            this.lpfNode.connect(this.satDryGain);
+            this.satDryGain.connect(this.preCrossoverBus);
+
+            // Saturoitu linja suodatetaan HPF:llä ennen Waveshaperia alapään mudan ehkäisemiseksi
+            this.lpfNode.connect(this.satHpfNode);
+            this.satHpfNode.connect(this.saturator);
+            this.saturator.connect(this.satWetGain);
+            this.satWetGain.connect(this.preCrossoverBus);
+
+            // 5. 3-Band Multiband Compressor Crossover Network (Kytketään preCrossoverBus-solmusta)
             this.lowSplit = this.ctx.createBiquadFilter();
             this.lowSplit.type = 'lowpass';
             this.lowSplit.frequency.value = 200;
@@ -101,11 +128,11 @@
             this.midComp = this.ctx.createDynamicsCompressor();
             this.highComp = this.ctx.createDynamicsCompressor();
 
-            // Set specific multiband behaviors for a punchy synthwave gluing
+            // Kompressoriasetukset dynaamiselle liimalle
             const now = this.ctx.currentTime;
             this.lowComp.threshold.setValueAtTime(-16, now);
             this.lowComp.ratio.setValueAtTime(2.5, now);
-            this.lowComp.attack.setValueAtTime(0.015, now); // Slightly slower for low transients
+            this.lowComp.attack.setValueAtTime(0.015, now); 
             this.lowComp.release.setValueAtTime(0.15, now);
 
             this.midComp.threshold.setValueAtTime(-16, now);
@@ -115,16 +142,16 @@
 
             this.highComp.threshold.setValueAtTime(-16, now);
             this.highComp.ratio.setValueAtTime(2.5, now);
-            this.highComp.attack.setValueAtTime(0.005, now); // Fast to control air
+            this.highComp.attack.setValueAtTime(0.005, now); 
             this.highComp.release.setValueAtTime(0.08, now);
 
             this.mbSum = this.ctx.createGain();
 
-            // Route crossover paths
-            this.saturator.connect(this.lowSplit);
-            this.saturator.connect(this.midSplitHP);
+            // Reititetään taajuussplitit crossover-suodattimiin
+            this.preCrossoverBus.connect(this.lowSplit);
+            this.preCrossoverBus.connect(this.midSplitHP);
             this.midSplitHP.connect(this.midSplitLP);
-            this.saturator.connect(this.highSplit);
+            this.preCrossoverBus.connect(this.highSplit);
 
             this.lowSplit.connect(this.lowComp);
             this.midSplitLP.connect(this.midComp);
@@ -134,15 +161,15 @@
             this.midComp.connect(this.mbSum);
             this.highComp.connect(this.mbSum);
 
-            // 6. Master Limiter Drive & Master Limiter
+            // 6. Master Limiter Drive & Master Limiter (Asetettu oletukseksi 2.0 dB)
             this.limiterDrive = this.ctx.createGain();
-            this.limiterDrive.gain.value = this.dbToGain(3.0); // Drive input into ceiling
+            this.limiterDrive.gain.value = this.dbToGain(2.0); 
 
             this.masterLimiter = this.ctx.createDynamicsCompressor();
             this.masterLimiter.attack.value = 0.005;
             this.masterLimiter.release.value = 0.050;
             this.masterLimiter.threshold.value = -0.5; // Ceiling
-            this.masterLimiter.ratio.value = 20.0; // High ratio for brickwall limiting
+            this.masterLimiter.ratio.value = 20.0; 
 
             this.mbSum.connect(this.limiterDrive);
             this.limiterDrive.connect(this.masterLimiter);
@@ -154,7 +181,7 @@
 
             this.generateReverbImpulse();
 
-            // Sync with initial DOM Slider inputs automatically
+            // Synkronoidaan äänenvoimakkuuden oletusarvo
             const volInput = document.getElementById('master-vol');
             if (volInput) this.setMasterVolume(volInput.value);
 
@@ -203,6 +230,12 @@
 
             const satDrive = document.getElementById('master-sat-drive');
             if (satDrive) this.setMasterSaturation(parseFloat(satDrive.value));
+
+            const satHpf = document.getElementById('master-sat-hpf');
+            if (satHpf) this.setMasterSatHPF(parseFloat(satHpf.value));
+
+            const satMix = document.getElementById('master-sat-mix');
+            if (satMix) this.setMasterSatMix(parseFloat(satMix.value));
 
             const mbThresh = document.getElementById('master-mb-thresh');
             if (mbThresh) this.setMasterMBThreshold(parseFloat(mbThresh.value));
@@ -262,6 +295,8 @@
             bindSlider('master-hpf-freq', (val) => this.setMasterHPF(val));
             bindSlider('master-lpf-freq', (val) => this.setMasterLPF(val));
             bindSlider('master-sat-drive', (val) => this.setMasterSaturation(val));
+            bindSlider('master-sat-hpf', (val) => this.setMasterSatHPF(val));
+            bindSlider('master-sat-mix', (val) => this.setMasterSatMix(val));
             bindSlider('master-mb-thresh', (val) => this.setMasterMBThreshold(val));
             bindSlider('master-mb-ratio', (val) => this.setMasterMBRatio(val));
         },
@@ -287,6 +322,12 @@
         },
         setMasterSaturation(val) {
             if (this.saturator) this.saturator.curve = this.makeDistortionCurve(val);
+        },
+        setMasterSatHPF(val) {
+            if (this.satHpfNode) this.satHpfNode.frequency.setTargetAtTime(val, this.ctx.currentTime, 0.02);
+        },
+        setMasterSatMix(val) {
+            if (this.satWetGain) this.satWetGain.gain.setTargetAtTime(val, this.ctx.currentTime, 0.02);
         },
         setMasterMBThreshold(db) {
             if (this.lowComp && this.midComp && this.highComp) {
@@ -327,7 +368,6 @@
         async fetchServerFiles() {
             this.initAudioContext();
             
-            // List all the exact filenames expected in the root folder
             const filesToFetch = [
                 'kick.wav', 'snare.wav', 'hihat.wav', 'tom1.wav', 'tom2.wav', 'clap.wav', 'crash.wav',
                 'bass1.wav', 'bass2.wav', 
@@ -448,7 +488,7 @@
                 const flangerGain = ctx.createGain();
                 flangerGain.gain.value = fx.flanger;
                 flangerDelay.connect(flangerGain);
-                flangerGain.connect(finalDest);
+                flangerDelay.connect(finalDest);
                 envGain.connect(flangerDelay);
                 
                 if (!isOffline) this.activeSources.push(osc);
@@ -525,7 +565,6 @@
                 const durSec = ev.durationSteps * this.stepDuration;
                 let vol = ev.volume !== undefined ? ev.volume : 0.8;
                 
-                // Scale specific drum piece volumes dynamically if in section editor
                 const name = ev.bufferName.toLowerCase();
                 if (ev.type === 'drum' && ev.section) {
                     const secEl = document.querySelector(`.song-section[data-section="${ev.section}"]`);
@@ -592,7 +631,7 @@
                     source.connect(volGain);
                     volGain.connect(envGain);
 
-                    let finalDest = this.summingBus; // Routed to FX Summing Bus
+                    let finalDest = this.preCrossoverBus; 
                     if (ev.type === 'drum') {
                         finalDest = this.drumBusGain;
                         if (name.includes('kick')) {
@@ -618,7 +657,6 @@
                     this.activeVolNodes.push({ gainNode: volGain, stopTime: stopTime, section: ev.section, group: volGroup });
                 }
 
-                // Volume changes directly translate to MIDI Velocity values dynamically
                 if (midiOut && ev.midiNote) {
                     const ch = midiChannelMap[ev.instrument];
                     if (ch !== undefined) {
@@ -678,13 +716,15 @@
             const offlineCtx = new OfflineCtx(2, lengthSamples, sampleRate);
 
             // Fetch live settings for exact offline duplication
-            const activeLimGain = parseFloat(document.getElementById('master-lim-gain')?.value || 3.0);
+            const activeLimGain = parseFloat(document.getElementById('master-lim-gain')?.value || 2.0);
             const activeLimCeiling = parseFloat(document.getElementById('master-lim-ceiling')?.value || -0.5);
             const activeLimAttack = parseFloat(document.getElementById('master-lim-attack')?.value || 0.005);
             const activeLimRelease = parseFloat(document.getElementById('master-lim-release')?.value || 0.05);
             const activeHpfFreq = parseFloat(document.getElementById('master-hpf-freq')?.value || 20);
             const activeLpfFreq = parseFloat(document.getElementById('master-lpf-freq')?.value || 20000);
-            const activeSatDrive = parseFloat(document.getElementById('master-sat-drive')?.value || 15);
+            const activeSatDrive = parseFloat(document.getElementById('master-sat-drive')?.value || 3);
+            const activeSatHpf = parseFloat(document.getElementById('master-sat-hpf')?.value || 150);
+            const activeSatMix = parseFloat(document.getElementById('master-sat-mix')?.value || 0.50);
             const activeMbThresh = parseFloat(document.getElementById('master-mb-thresh')?.value || -16);
             const activeMbRatio = parseFloat(document.getElementById('master-mb-ratio')?.value || 2.5);
 
@@ -718,10 +758,30 @@
             sumBus.connect(offHpf);
             offHpf.connect(offLpf);
 
+            // Offline Parallel Saturation
+            const offSatHpf = offlineCtx.createBiquadFilter();
+            offSatHpf.type = 'highpass';
+            offSatHpf.frequency.value = activeSatHpf;
+
             const offSat = offlineCtx.createWaveShaper();
             offSat.curve = this.makeDistortionCurve(activeSatDrive);
             offSat.oversample = '4x';
-            offLpf.connect(offSat);
+
+            const offSatDryGain = offlineCtx.createGain();
+            offSatDryGain.gain.value = 1.0;
+
+            const offSatWetGain = offlineCtx.createGain();
+            offSatWetGain.gain.value = activeSatMix;
+
+            const offPreCrossoverBus = offlineCtx.createGain();
+
+            offLpf.connect(offSatDryGain);
+            offSatDryGain.connect(offPreCrossoverBus);
+
+            offLpf.connect(offSatHpf);
+            offSatHpf.connect(offSat);
+            offSat.connect(offSatWetGain);
+            offSatWetGain.connect(offPreCrossoverBus);
 
             // Multiband paths duplication
             const offLowSplit = offlineCtx.createBiquadFilter();
@@ -749,10 +809,10 @@
 
             const offMbSum = offlineCtx.createGain();
 
-            offSat.connect(offLowSplit);
-            offSat.connect(offMidSplitHP);
+            offPreCrossoverBus.connect(offLowSplit);
+            offPreCrossoverBus.connect(offMidSplitHP);
             offMidSplitHP.connect(offMidSplitLP);
-            offSat.connect(offHighSplit);
+            offPreCrossoverBus.connect(offHighSplit);
 
             offLowSplit.connect(offLowComp);
             offMidSplitLP.connect(offMidComp);
@@ -776,7 +836,6 @@
                 const durSec = ev.durationSteps * stepDuration;
                 let vol = ev.volume !== undefined ? ev.volume : 0.8;
                 
-                // Scale specific offline drum levels dynamically
                 const name = ev.bufferName.toLowerCase();
                 if (ev.type === 'drum' && ev.section) {
                     const secEl = document.querySelector(`.song-section[data-section="${ev.section}"]`);
