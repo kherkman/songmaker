@@ -531,7 +531,7 @@
                             });
                         });
                         events.push({
-                            type: 'melodic', instrument: 'bass', bufferName: bufferBass, midiNote: rootMidi + currentPitchOffset, timeStep: globalOffset,
+                            type: 'melodic', instrument: 'bass', bufferName: bufferBass, midiNote: rootMidi + currentPitchOffset, timeStep: globalStepOffset,
                             durationSteps: finalDuration, ducking: false, adsr: null, volume: volBassFinal, section: lastSeqItem.section
                         });
 
