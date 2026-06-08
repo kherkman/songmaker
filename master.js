@@ -531,7 +531,7 @@
                             });
                         });
                         events.push({
-                            type: 'melodic', instrument: 'bass', bufferName: bufferBass, midiNote: rootMidi + currentPitchOffset, timeStep: globalStepOffset,
+                            type: 'melodic', instrument: 'bass', bufferName: bufferBass, midiNote: rootMidi + currentPitchOffset, timeStep: globalOffset,
                             durationSteps: finalDuration, ducking: false, adsr: null, volume: volBassFinal, section: lastSeqItem.section
                         });
 
@@ -682,13 +682,15 @@
                     autoFills: this.elements.autoFillsToggle.checked,
                     
                     // Master Effects controls values added to export
-                    limGain: document.getElementById('master-lim-gain')?.value || '3.0',
+                    limGain: document.getElementById('master-lim-gain')?.value || '2.0',
                     limCeiling: document.getElementById('master-lim-ceiling')?.value || '-0.5',
                     limAttack: document.getElementById('master-lim-attack')?.value || '0.005',
                     limRelease: document.getElementById('master-lim-release')?.value || '0.05',
                     hpfFreq: document.getElementById('master-hpf-freq')?.value || '20',
                     lpfFreq: document.getElementById('master-lpf-freq')?.value || '20000',
-                    satDrive: document.getElementById('master-sat-drive')?.value || '15',
+                    satDrive: document.getElementById('master-sat-drive')?.value || '3',
+                    satHpf: document.getElementById('master-sat-hpf')?.value || '150',
+                    satMix: document.getElementById('master-sat-mix')?.value || '0.50',
                     mbThresh: document.getElementById('master-mb-thresh')?.value || '-16.0',
                     mbRatio: document.getElementById('master-mb-ratio')?.value || '2.5'
                 },
@@ -737,19 +739,19 @@
                     prog: sec.querySelector('.chord-prog').value, sound: sec.querySelector('.chord-sound').value,
                     ducking: sec.querySelector('.chord-ducking').checked, arp: sec.querySelector('.chord-arp-toggle').checked,
                     arpPattern: sec.querySelector('.chord-arp-pattern').value,
-                    vol: sec.querySelector('.chord-vol') ? sec.querySelector('.chord-vol').value : '0.8',
+                    vol: sec.querySelector('.chord-vol') ? sec.querySelector('.chord-vol').value : '0.65',
                     adsr: window.SongComposer.Chords.getADSRData(sec)
                 };
                 secState.bass = {
                     rhythm: sec.querySelector('.bass-rhythm').value, sound: sec.querySelector('.bass-sound').value,
                     ducking: sec.querySelector('.bass-ducking').checked,
-                    vol: sec.querySelector('.bass-vol') ? sec.querySelector('.bass-vol').value : '0.8'
+                    vol: sec.querySelector('.bass-vol') ? sec.querySelector('.bass-vol').value : '0.85'
                 };
                 sec.querySelectorAll('.lead-card').forEach(lead => {
                     secState.leads.push({
                         rhythm: lead.querySelector('.lead-rhythm').value, sound: lead.querySelector('.lead-sound').value,
                         ducking: lead.querySelector('.lead-ducking').checked,
-                        vol: lead.querySelector('.lead-vol') ? lead.querySelector('.lead-vol').value : '0.8',
+                        vol: lead.querySelector('.lead-vol') ? lead.querySelector('.lead-vol').value : '0.75',
                         flanger: lead.querySelector('.lead-flanger') ? lead.querySelector('.lead-flanger').value : '0',
                         delay: lead.querySelector('.lead-delay') ? lead.querySelector('.lead-delay').value : '0.2',
                         reverb: lead.querySelector('.lead-reverb') ? lead.querySelector('.lead-reverb').value : '0.3',
@@ -813,6 +815,12 @@
                         }
                         if (state.master.satDrive !== undefined && document.getElementById('master-sat-drive')) {
                             document.getElementById('master-sat-drive').value = state.master.satDrive;
+                        }
+                        if (state.master.satHpf !== undefined && document.getElementById('master-sat-hpf')) {
+                            document.getElementById('master-sat-hpf').value = state.master.satHpf;
+                        }
+                        if (state.master.satMix !== undefined && document.getElementById('master-sat-mix')) {
+                            document.getElementById('master-sat-mix').value = state.master.satMix;
                         }
                         if (state.master.mbThresh !== undefined && document.getElementById('master-mb-thresh')) {
                             document.getElementById('master-mb-thresh').value = state.master.mbThresh;
