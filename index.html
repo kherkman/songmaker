@@ -72,13 +72,13 @@
                     <div class="control-group">
                         <label>Tempo (BPM)</label>
                         <div style="display: flex; justify-content: flex-end;">
-                            <input type="number" id="master-tempo" value="110" min="40" max="300" style="width: 80px;">
+                            <input type="number" id="master-tempo" value="100" min="40" max="300" style="width: 80px;">
                         </div>
                     </div>
                     
                     <div class="control-group">
                         <label>Master Vol</label>
-                        <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.8">
+                        <input type="range" id="master-vol" min="0" max="1" step="0.01" value="0.6">
                         <label style="margin-top: 10px;">Humanize</label>
                         <input type="range" id="master-humanize" min="0" max="1" step="0.01" value="0">
                     </div>
@@ -86,7 +86,7 @@
                     <!-- Master Limiter -->
                     <div class="control-group" style="background: rgba(0,0,0,0.15); padding: 10px; border-radius: 8px;">
                         <label style="color: var(--accent-primary);">Master Limiter</label>
-                        <label style="font-size: 0.75rem; margin-top: 5px;">Gain (dB): <input type="range" id="master-lim-gain" min="0" max="12" step="0.1" value="3.0"></label>
+                        <label style="font-size: 0.75rem; margin-top: 5px;">Gain (dB): <input type="range" id="master-lim-gain" min="0" max="12" step="0.1" value="2.0"></label>
                         <label style="font-size: 0.75rem;">Ceiling (dB): <input type="range" id="master-lim-ceiling" min="-12" max="0" step="0.1" value="-0.5"></label>
                         <label style="font-size: 0.75rem;">Attack (s): <input type="range" id="master-lim-attack" min="0.001" max="0.1" step="0.001" value="0.005"></label>
                         <label style="font-size: 0.75rem;">Release (s): <input type="range" id="master-lim-release" min="0.01" max="1.0" step="0.01" value="0.05"></label>
@@ -97,7 +97,7 @@
                         <label style="color: var(--accent-secondary);">Master EQ & Saturation</label>
                         <label style="font-size: 0.75rem; margin-top: 5px;">HPF Freq (Hz): <input type="range" id="master-hpf-freq" min="10" max="1000" step="1" value="20"></label>
                         <label style="font-size: 0.75rem;">LPF Freq (Hz): <input type="range" id="master-lpf-freq" min="200" max="20000" step="10" value="20000"></label>
-                        <label style="font-size: 0.75rem;">Saturation (%): <input type="range" id="master-sat-drive" min="0" max="100" step="1" value="15"></label>
+                        <label style="font-size: 0.75rem;">Saturation (%): <input type="range" id="master-sat-drive" min="0" max="100" step="1" value="1"></label>
                     </div>
 
                     <!-- Multiband Compression -->
