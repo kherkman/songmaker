@@ -594,10 +594,24 @@
         },
 
         extractDrumEvents(drumData, eventsArray, globalOffset, vol, busParams, sectionTarget) {
+            // Read individual drum levels from UI if section target matches
+            let volKick = 0.90, volSnare = 0.85, volHihat = 0.75;
+            if (sectionTarget) {
+                const secEl = document.querySelector(`.song-section[data-section="${sectionTarget}"]`);
+                if (secEl) {
+                    const kEl = secEl.querySelector('.drum-kick-vol');
+                    const sEl = secEl.querySelector('.drum-snare-vol');
+                    const hEl = secEl.querySelector('.drum-hihat-vol');
+                    if (kEl) volKick = parseFloat(kEl.value);
+                    if (sEl) volSnare = parseFloat(sEl.value);
+                    if (hEl) volHihat = parseFloat(hEl.value);
+                }
+            }
+
             const drumMap = [
-                { key: 'kick', sound: 'kick.wav', midi: 36 },
-                { key: 'snare', sound: 'snare.wav', midi: 38 },
-                { key: 'hihat', sound: 'hihat.wav', midi: 42 }
+                { key: 'kick', sound: 'kick.wav', midi: 36, pieceVol: volKick },
+                { key: 'snare', sound: 'snare.wav', midi: 38, pieceVol: volSnare },
+                { key: 'hihat', sound: 'hihat.wav', midi: 42, pieceVol: volHihat }
             ];
             
             drumMap.forEach(d => {
@@ -607,7 +621,7 @@
                             eventsArray.push({
                                 type: 'drum', instrument: d.key, bufferName: d.sound, midiNote: d.midi,
                                 timeStep: globalOffset + hit.stepIndex, durationSteps: 1, drumBusParams: busParams,
-                                volume: vol, section: sectionTarget
+                                volume: vol * d.pieceVol, section: sectionTarget
                             });
                         }
                     });
@@ -627,14 +641,32 @@
             const midiMap = { kick: 36, snare: 38, tom1: 48, tom2: 45, clap: 39 };
             const soundMap = { kick: 'kick.wav', snare: 'snare.wav', tom1: 'tom1.wav', tom2: 'tom2.wav', clap: 'clap.wav' };
             
+            // Read individual drum levels if section target matches
+            let volKick = 0.90, volSnare = 0.85, volHihat = 0.75;
+            if (sectionTarget) {
+                const secEl = document.querySelector(`.song-section[data-section="${sectionTarget}"]`);
+                if (secEl) {
+                    const kEl = secEl.querySelector('.drum-kick-vol');
+                    const sEl = secEl.querySelector('.drum-snare-vol');
+                    const hEl = secEl.querySelector('.drum-hihat-vol');
+                    if (kEl) volKick = parseFloat(kEl.value);
+                    if (sEl) volSnare = parseFloat(sEl.value);
+                    if (hEl) volHihat = parseFloat(hEl.value);
+                }
+            }
+
             for (let i = 0; i < fillData.replaceSteps; i++) {
                 instruments.forEach(inst => {
                     const pattern = fillData[inst] || '0';
                     if (pattern[i % pattern.length] === '1') {
+                        let finalVol = vol;
+                        if (inst === 'kick') finalVol *= volKick;
+                        else if (inst === 'snare') finalVol *= volSnare;
+
                         eventsArray.push({
                             type: 'drum', instrument: inst, bufferName: soundMap[inst], midiNote: midiMap[inst],
                             timeStep: globalOffset + i, durationSteps: 1, drumBusParams: busParams,
-                            volume: vol, section: sectionTarget
+                            volume: finalVol, section: sectionTarget
                         });
                     }
                 });
@@ -647,7 +679,18 @@
                     root: this.elements.root.value, scale: this.elements.scale.value,
                     tempo: this.elements.tempo.value, vol: this.elements.vol.value,
                     humanize: this.elements.humanize.value,
-                    autoFills: this.elements.autoFillsToggle.checked
+                    autoFills: this.elements.autoFillsToggle.checked,
+                    
+                    // Master Effects controls values added to export
+                    limGain: document.getElementById('master-lim-gain')?.value || '3.0',
+                    limCeiling: document.getElementById('master-lim-ceiling')?.value || '-0.5',
+                    limAttack: document.getElementById('master-lim-attack')?.value || '0.005',
+                    limRelease: document.getElementById('master-lim-release')?.value || '0.05',
+                    hpfFreq: document.getElementById('master-hpf-freq')?.value || '20',
+                    lpfFreq: document.getElementById('master-lpf-freq')?.value || '20000',
+                    satDrive: document.getElementById('master-sat-drive')?.value || '15',
+                    mbThresh: document.getElementById('master-mb-thresh')?.value || '-16.0',
+                    mbRatio: document.getElementById('master-mb-ratio')?.value || '2.5'
                 },
                 structure: document.getElementById('song-structure-input').value,
                 timelineData: [],
@@ -716,6 +759,9 @@
                 secState.drums = {
                     kick: sec.querySelector('.drum-kick').value, snare: sec.querySelector('.drum-snare').value,
                     hihat: sec.querySelector('.drum-hihat').value,
+                    kickVol: sec.querySelector('.drum-kick-vol') ? sec.querySelector('.drum-kick-vol').value : '0.90',
+                    snareVol: sec.querySelector('.drum-snare-vol') ? sec.querySelector('.drum-snare-vol').value : '0.85',
+                    hihatVol: sec.querySelector('.drum-hihat-vol') ? sec.querySelector('.drum-hihat-vol').value : '0.75',
                     compThresh: sec.querySelector('.drum-comp-thresh').value, compRatio: sec.querySelector('.drum-comp-ratio').value,
                     vol: sec.querySelector('.drum-vol') ? sec.querySelector('.drum-vol').value : '0.8'
                 };
@@ -745,8 +791,43 @@
                         this.elements.vol.value = state.master.vol;
                         if (state.master.humanize !== undefined) this.elements.humanize.value = state.master.humanize;
                         this.elements.autoFillsToggle.checked = state.master.autoFills;
+                        
+                        // Import Master Effects controls values
+                        if (state.master.limGain !== undefined && document.getElementById('master-lim-gain')) {
+                            document.getElementById('master-lim-gain').value = state.master.limGain;
+                        }
+                        if (state.master.limCeiling !== undefined && document.getElementById('master-lim-ceiling')) {
+                            document.getElementById('master-lim-ceiling').value = state.master.limCeiling;
+                        }
+                        if (state.master.limAttack !== undefined && document.getElementById('master-lim-attack')) {
+                            document.getElementById('master-lim-attack').value = state.master.limAttack;
+                        }
+                        if (state.master.limRelease !== undefined && document.getElementById('master-lim-release')) {
+                            document.getElementById('master-lim-release').value = state.master.limRelease;
+                        }
+                        if (state.master.hpfFreq !== undefined && document.getElementById('master-hpf-freq')) {
+                            document.getElementById('master-hpf-freq').value = state.master.hpfFreq;
+                        }
+                        if (state.master.lpfFreq !== undefined && document.getElementById('master-lpf-freq')) {
+                            document.getElementById('master-lpf-freq').value = state.master.lpfFreq;
+                        }
+                        if (state.master.satDrive !== undefined && document.getElementById('master-sat-drive')) {
+                            document.getElementById('master-sat-drive').value = state.master.satDrive;
+                        }
+                        if (state.master.mbThresh !== undefined && document.getElementById('master-mb-thresh')) {
+                            document.getElementById('master-mb-thresh').value = state.master.mbThresh;
+                        }
+                        if (state.master.mbRatio !== undefined && document.getElementById('master-mb-ratio')) {
+                            document.getElementById('master-mb-ratio').value = state.master.mbRatio;
+                        }
+
                         this.updateAutoFillsState();
                         if (window.SongComposer.Main) window.SongComposer.Main.updateScaleSumDisplay();
+                        
+                        // Let audio.js read the newly imported effects levels
+                        if (window.SongComposer.Audio && typeof window.SongComposer.Audio.readDOMFXDefaults === 'function') {
+                            window.SongComposer.Audio.readDOMFXDefaults();
+                        }
                     }
                     
                     if (state.fills) {
@@ -797,6 +878,12 @@
                                 secEl.querySelector('.drum-kick').value = s.drums.kick;
                                 secEl.querySelector('.drum-snare').value = s.drums.snare;
                                 secEl.querySelector('.drum-hihat').value = s.drums.hihat;
+                                
+                                // Import individual drum levels dynamically
+                                if (s.drums.kickVol && secEl.querySelector('.drum-kick-vol')) secEl.querySelector('.drum-kick-vol').value = s.drums.kickVol;
+                                if (s.drums.snareVol && secEl.querySelector('.drum-snare-vol')) secEl.querySelector('.drum-snare-vol').value = s.drums.snareVol;
+                                if (s.drums.hihatVol && secEl.querySelector('.drum-hihat-vol')) secEl.querySelector('.drum-hihat-vol').value = s.drums.hihatVol;
+
                                 secEl.querySelector('.drum-comp-thresh').value = s.drums.compThresh;
                                 secEl.querySelector('.drum-comp-ratio').value = s.drums.compRatio;
                                 if (s.drums.vol && secEl.querySelector('.drum-vol')) secEl.querySelector('.drum-vol').value = s.drums.vol;
